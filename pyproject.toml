@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "desktop-band"
+version = "0.1.0"
+description = "A tiny animated band that reacts to desktop audio."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "desktop-overlay @ https://github.com/boubou666/desktop-overlay/releases/download/v0.2.1/desktop_overlay-0.2.1-py3-none-any.whl",
+    "numpy>=1.24",
+    "onnxruntime>=1.23,<2",
+    "pillow>=11,<13",
+    "soundcard>=0.4.3,<0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/boubou666/desktop-band"
+Repository = "https://github.com/boubou666/desktop-band"
+Changelog = "https://github.com/boubou666/desktop-band/blob/main/CHANGELOG.md"
+
+[project.scripts]
+desktop-band = "desktop_band.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["desktop_band*"]
+
+[tool.setuptools.package-data]
+desktop_band = ["assets/*.png"]
