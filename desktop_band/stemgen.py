@@ -215,6 +215,7 @@ class StemgenAnalyzer:
 
         self._base = AudioAnalyzer()
         self._component_analyzers = {
+            "drums": AudioAnalyzer(),
             "vocals": AudioAnalyzer(),
             "other": AudioAnalyzer(),
         }
@@ -324,6 +325,8 @@ class StemgenAnalyzer:
         }
         other = stems[self._source_order.index("other")].mean(axis=0)
         low, mid, high = self._spectral_profile(other)
+        other_features = component_features["other"]
+        drum_features = component_features["drums"]
 
         return replace(
             base,
@@ -339,6 +342,15 @@ class StemgenAnalyzer:
             stem_other_low=low,
             stem_other_mid=mid,
             stem_other_high=high,
+            percussive_low=drum_features.percussive_low,
+            percussive_mid=drum_features.percussive_mid,
+            percussive_high=drum_features.percussive_high,
+            stem_other_onset=other_features.onset,
+            stem_other_harmonic=other_features.harmonic,
+            stem_other_centroid=other_features.spectral_centroid,
+            stem_other_flatness=other_features.spectral_flatness,
+            stem_other_pitch_stability=other_features.pitch_stability,
+            stem_other_note_density=other_features.note_density,
         )
 
     def _infer_hop(self, hop: np.ndarray) -> np.ndarray:

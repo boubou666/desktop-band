@@ -48,6 +48,26 @@ class SystemAudioSource(FeatureSource):
         self.sample_rate = 44_100 if analysis == "stemgen" else sample_rate
         self.block_size = block_size
         self.model_path = model_path
+        self._preferred_device_key: str | None = None
+        self._selection_revision = 0
+
+    def available_outputs(self) -> tuple[tuple[str, str], ...]:
+        try:
+            import soundcard as sc
+
+            return tuple((_device_key(item), str(item.name)) for item in sc.all_speakers())
+        except Exception:
+            return ()
+
+    def select_output(self, device_key: str | None) -> None:
+        """Select a speaker, or ``None`` to follow the Windows default again."""
+
+        self._preferred_device_key = device_key
+        self._selection_revision += 1
+
+    @property
+    def selected_output(self) -> str | None:
+        return self._preferred_device_key
 
     def _run(self) -> None:
         try:
@@ -75,14 +95,15 @@ class SystemAudioSource(FeatureSource):
 
         while not self._stop.is_set():
             try:
-                speaker = sc.default_speaker()
+                speaker = _speaker_for_selection(sc, self._preferred_device_key)
                 if speaker is None:
-                    raise RuntimeError("aucune sortie audio par défaut")
+                    raise RuntimeError("sortie audio sélectionnée introuvable")
                 loopback = _loopback_for_speaker(sc, speaker)
                 if loopback is None:
                     raise RuntimeError("aucune source loopback WASAPI")
 
                 selected_key = _device_key(speaker)
+                selected_revision = self._selection_revision
                 self.status = "{} : {}".format(analysis_name, speaker.name)
                 self.error = analysis_warning
                 with loopback.recorder(
@@ -98,10 +119,15 @@ class SystemAudioSource(FeatureSource):
                             continue
                         next_device_check = now + 0.75
                         current_speaker = sc.default_speaker()
-                        if (
-                            current_speaker is None
-                            or _device_key(current_speaker) != selected_key
-                        ):
+                        selection_changed = self._selection_revision != selected_revision
+                        default_changed = (
+                            self._preferred_device_key is None
+                            and (
+                                current_speaker is None
+                                or _device_key(current_speaker) != selected_key
+                            )
+                        )
+                        if selection_changed or default_changed:
                             self.status = "changement de sortie audio"
                             break
             except Exception as exc:
@@ -119,6 +145,15 @@ def _device_key(device) -> str:
     if identifier is not None:
         return str(identifier)
     return str(getattr(device, "name", ""))
+
+
+def _speaker_for_selection(sc, selected_key: str | None):
+    if selected_key is None:
+        return sc.default_speaker()
+    return next(
+        (item for item in sc.all_speakers() if _device_key(item) == selected_key),
+        None,
+    )
 
 
 def _loopback_for_speaker(sc, speaker):

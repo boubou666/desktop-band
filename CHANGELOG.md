@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic reconnection when the default Windows audio output changes.
 - Contextual gopnik speech bubbles on drops, vocal entries, bass arrivals,
   strong drum hits, climaxes and playback restarts.
+- V2 confidence router with temporal evidence, mutually competitive roles and
+  idle/groove/playing states.
+- Calibrated balanced, taiko, hardbass and soft detection profiles.
+- Drop/chorus energy transitions with full-band boost, spotlights and dedicated
+  reactions.
+- Dominant-role solo foregrounding and procedural idle animations.
+- Interchangeable manifest-based sprite packs.
+- System-tray controls for visibility, output selection, lineup size, sprite
+  pack, detection profile and clean shutdown.
+- Temporary 30-second move/resize mode that safely disables click-through.
 
 ### Changed
 
@@ -22,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   slow music measurements honest without making the band look static.
 - Tempo detection now uses a continuous rhythmic-envelope autocorrelation
   instead of sparse isolated onsets.
+- The debug badge now shows the top role confidences and their routing states.
+- StemgenRT's drum and `other` outputs now receive extra transient, harmonic,
+  timbral, pitch-stability and note-density analysis before visual routing.
 
 ## [0.1.0] - 2026-09-21
 

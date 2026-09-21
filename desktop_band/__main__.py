@@ -57,6 +57,22 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="affiche le BPM détecté en direct",
     )
+    parser.add_argument(
+        "--sprite-pack",
+        default="gopnik",
+        help="nom ou dossier d'un pack de sprites (défaut : gopnik)",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=("balanced", "taiko", "hardbass", "soft"),
+        default="balanced",
+        help="calibration de détection (défaut : balanced)",
+    )
+    parser.add_argument(
+        "--no-tray",
+        action="store_true",
+        help="désactive l'icône et les commandes de zone de notification",
+    )
     return parser
 
 
@@ -72,6 +88,9 @@ def main() -> int:
             model_path=args.model_path,
             layout=args.layout,
             debug=args.debug,
+            sprite_pack=args.sprite_pack,
+            detection_profile=args.profile,
+            tray=not args.no_tray,
         )
     )
 

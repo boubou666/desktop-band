@@ -3,36 +3,22 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 import time
 import tkinter as tk
 
 import numpy as np
 
-from .band import Musician, gated_activity, role_activity
-from .reactions import ShoutDetector
+from .band import Musician, gated_activity
+from .detection import RoleRouter
+from .moments import MusicalMomentDetector
+from .reactions import ShoutDetector, ShoutEvent
+from .sprites import SPRITE_SHEETS as _SPRITE_SHEETS
+from .sprites import load_sprite_pack
 
 
 SKIN = "#f3c6a5"
 INK = "#111827"
 METAL = "#cbd5e1"
-
-_SPRITE_SHEETS = (
-    ("gopnik_bassist.png", 1, {"bassist": 0}),
-    ("gopnik_bassist_extra.png", 1, {"bassist": 0}),
-    ("gopnik_singer_base.png", 1, {"singer": 0}),
-    ("gopnik_singer_mouths.png", 1, {"singer": 0}),
-    ("gopnik_drummer.png", 1, {"drummer": 0}),
-    ("gopnik_drummer_extra.png", 1, {"drummer": 0}),
-    ("gopnik_keyboard.png", 1, {"keyboard": 0}),
-    ("gopnik_keyboard_extra.png", 1, {"keyboard": 0}),
-    ("gopnik_guitarist.png", 1, {"guitarist": 0}),
-    ("gopnik_guitarist_extra.png", 1, {"guitarist": 0}),
-    ("gopnik_percussion.png", 1, {"percussion": 0}),
-    ("gopnik_percussion_extra.png", 1, {"percussion": 0}),
-    ("gopnik_vibe_dance_left.png", 1, {"vibing": 0}),
-    ("gopnik_vibe_dance_right.png", 1, {"vibing": 0}),
-)
 
 _ACTIVITY_ENVELOPES = {
     # Vocals need time to visually form a phrase; an instant attack makes the
@@ -144,6 +130,8 @@ class BandRenderer:
         height: int,
         compact: bool = False,
         debug: bool = False,
+        sprite_pack: str = "gopnik",
+        detection_profile: str = "balanced",
     ):
         self.canvas = canvas
         self.lineup = lineup
@@ -151,6 +139,7 @@ class BandRenderer:
         self.height = height
         self.compact = compact
         self.debug = debug
+        self.sprite_pack = sprite_pack
         self._frame_size = 166 if compact else 220
         self._sprite_size = 158 if compact else 210
         self.started = time.monotonic()
@@ -159,20 +148,49 @@ class BandRenderer:
         self._playing = [False for _ in lineup]
         self._animation_phase = [0.0 for _ in lineup]
         self._shout_detector = ShoutDetector()
+        self._moment_detector = MusicalMomentDetector()
+        self._role_router = RoleRouter(detection_profile)
+        self._last_decision = None
         self._shout_event = None
         self._shout_until = 0.0
         self.sprite_error = None
         self._sprite_frames = self._load_sprite_frames()
 
+    def set_lineup(self, lineup: tuple[Musician, ...]) -> None:
+        self.lineup = lineup
+        self._role_router.reset()
+        self._activity = [0.0 for _ in lineup]
+        self._playing = [False for _ in lineup]
+        self._animation_phase = [0.0 for _ in lineup]
+
+    def resize(self, width: int, height: int) -> None:
+        self.width = max(220, int(width))
+        self.height = max(180, int(height))
+
+    def set_detection_profile(self, profile: str) -> None:
+        self._role_router.set_profile(profile)
+
+    def set_sprite_pack(self, sprite_pack: str) -> None:
+        previous = self.sprite_pack
+        self.sprite_pack = sprite_pack
+        frames = self._load_sprite_frames()
+        if not frames:
+            self.sprite_pack = previous
+            self._sprite_frames = self._load_sprite_frames()
+            return
+        self._sprite_frames = frames
+
     def _load_sprite_frames(self):
-        asset_dir = Path(__file__).with_name("assets")
         frames = {}
+        self.sprite_error = None
         try:
             from PIL import Image, ImageTk
 
             content_by_role = {}
-            for filename, row_count, role_rows in _SPRITE_SHEETS:
-                path = asset_dir / filename
+            for sheet in load_sprite_pack(self.sprite_pack):
+                path = sheet.path
+                row_count = sheet.rows
+                role_rows = sheet.role_rows
                 if not path.is_file():
                     continue
                 with Image.open(path) as source:
@@ -331,19 +349,38 @@ class BandRenderer:
         usable = self.width - 2 * margin
         spacing = usable / max(1, len(self.lineup))
         ground = self.height - (24 if self.compact else 34)
-        role_scores = {
-            musician.role: role_activity(musician.role, features)
-            for musician in self.lineup
+        roles = tuple(musician.role for musician in self.lineup)
+        decision = self._role_router.update(features, roles, dt)
+        self._last_decision = decision
+        role_scores = decision.scores
+        moment = self._moment_detector.update(features, role_scores, now)
+        drop_active = self._moment_detector.is_active(now)
+        if moment is not None and now >= self._shout_until:
+            self._shout_event = ShoutEvent(moment.text, "vibing", moment.duration)
+            self._shout_until = now + moment.duration
+
+        role_positions = {
+            musician.role: margin + spacing * (index + 0.5)
+            for index, musician in enumerate(self.lineup)
         }
-        role_positions = {}
+        if drop_active:
+            self._draw_drop_spotlight(elapsed)
 
         for index, musician in enumerate(self.lineup):
-            x = margin + spacing * (index + 0.5)
-            role_positions[musician.role] = x
             raw_score = role_scores[musician.role]
-            target, self._playing[index] = gated_activity(
-                musician.role, raw_score, self._playing[index]
-            )
+            state = decision.states[musician.role]
+            if state == "playing":
+                target, self._playing[index] = gated_activity(
+                    musician.role, raw_score, self._playing[index]
+                )
+            elif state == "groove":
+                target = 0.08 + raw_score * 0.32
+                self._playing[index] = False
+            else:
+                target = 0.0
+                self._playing[index] = False
+            if drop_active and musician.role != "singer":
+                target = max(target, 0.58)
             attack, release = _ACTIVITY_ENVELOPES.get(
                 musician.role, (0.14, 0.28)
             )
@@ -361,15 +398,27 @@ class BandRenderer:
                 )
             else:
                 self._animation_phase[index] = 0.0
+
+        dominant = decision.dominant_role
+        draw_order = list(range(len(self.lineup)))
+        if dominant is not None:
+            draw_order.sort(key=lambda i: self.lineup[i].role == dominant)
+        for index in draw_order:
+            musician = self.lineup[index]
+            x = role_positions[musician.role]
             self._draw_musician(
                 musician, x, ground, elapsed, features, index,
                 self._activity[index],
+                state=decision.states[musician.role],
+                solo=musician.role == dominant,
+                drop_active=drop_active,
             )
 
-        shout = self._shout_detector.update(features, role_scores, now)
-        if shout is not None:
-            self._shout_event = shout
-            self._shout_until = now + shout.duration
+        if not drop_active:
+            shout = self._shout_detector.update(features, role_scores, now)
+            if shout is not None:
+                self._shout_event = shout
+                self._shout_until = now + shout.duration
         if self._shout_event is not None and now < self._shout_until:
             self._draw_shout(self._shout_event, role_positions)
 
@@ -393,20 +442,43 @@ class BandRenderer:
                 font=("Segoe UI", 9, "bold"),
             )
         elif self.debug:
-            badge_right = self.width - 8
-            badge_left = badge_right - 92
+            ranked = sorted(
+                (
+                    (score, role, decision.states[role])
+                    for role, score in role_scores.items()
+                    if role != "vibing"
+                ),
+                reverse=True,
+            )[:3]
+            details = "  ".join(
+                "{}:{:.0f}% {}".format(role[:4].upper(), score * 100, state[0].upper())
+                for score, role, state in ranked
+            )
+            badge_left = 8
+            badge_right = min(self.width - 8, badge_left + 330)
             self._rectangle(
                 badge_left, 7, badge_right, 33,
                 fill="#111827", outline="#22d3ee", width=2,
             )
             self._text(
-                (badge_left + badge_right) / 2,
+                badge_left + 8,
                 11,
-                "BPM {:.0f}".format(features.bpm),
-                anchor="n",
+                "BPM {:.0f}  {}".format(features.bpm, details),
+                anchor="nw",
                 fill="#ecfeff",
-                font=("Segoe UI", 10, "bold"),
+                font=("Consolas", 8, "bold"),
             )
+
+    def _draw_drop_spotlight(self, elapsed: float) -> None:
+        pulse = 0.5 + 0.5 * math.sin(elapsed * 14.0)
+        center = self.width / 2
+        color = "#facc15" if pulse > 0.42 else "#fb7185"
+        self._line(center - 150, 0, center - 45, self.height - 20,
+                   fill=color, width=4)
+        self._line(center + 150, 0, center + 45, self.height - 20,
+                   fill=color, width=4)
+        self._oval(center - 180, self.height - 34, center + 180, self.height - 15,
+                   fill="", outline=color, width=3)
 
     def _draw_shout(self, event, role_positions: dict[str, float]) -> None:
         target_x = role_positions.get(event.role, self.width / 2)
@@ -435,11 +507,13 @@ class BandRenderer:
         )
 
     def _draw_musician(
-        self, musician, x, ground, elapsed, features, index, activity
+        self, musician, x, ground, elapsed, features, index, activity,
+        *, state="playing", solo=False, drop_active=False,
     ) -> None:
         if musician.role in self._sprite_frames:
             self._draw_sprite_musician(
-                musician, x, ground, elapsed, features, index, activity
+                musician, x, ground, elapsed, features, index, activity,
+                state=state, solo=solo, drop_active=drop_active,
             )
             return
 
@@ -499,14 +573,22 @@ class BandRenderer:
             )
 
     def _draw_sprite_musician(
-        self, musician, x, ground, elapsed, features, index, activity
+        self, musician, x, ground, elapsed, features, index, activity,
+        *, state="playing", solo=False, drop_active=False,
     ) -> None:
         beat_hz = max(0.5, features.bpm / 60.0)
         pulse = math.sin(elapsed * math.tau * beat_hz + index * 0.7)
-        bob = -activity * (3.0 + features.onset * 8.0) + pulse * activity * 2.0
+        idle_breath = math.sin(elapsed * 1.35 + index) * 0.65
+        bob = (
+            -activity * (3.0 + features.onset * 8.0)
+            + pulse * activity * 2.0
+            + idle_breath * (1.0 - min(1.0, activity * 3.0))
+        )
+        if solo:
+            ground += 4
 
         role_frames = self._sprite_frames[musician.role]
-        if activity < 0.08:
+        if state != "playing" and not drop_active:
             frame_index = 0
         elif musician.role == "singer" and len(role_frames) >= 8:
             # The smoothed visual envelope prevents raw vocal estimates from
@@ -536,6 +618,13 @@ class BandRenderer:
             frame_index = 1 if int(elapsed * pose_speed) % 2 == 0 else 3
 
         sprite = role_frames[frame_index % len(role_frames)]
+        if solo:
+            halo_width = 32 + 4 * math.sin(elapsed * 5.0)
+            self._oval(
+                x - halo_width, ground - 8 + bob,
+                x + halo_width, ground + 7 + bob,
+                fill=musician.color, outline="#f8fafc", width=2,
+            )
         if self.compact and activity > 0.08:
             glow_width = 24 + activity * 22
             self._oval(
@@ -552,6 +641,8 @@ class BandRenderer:
         self.canvas.create_image(
             x, ground + 5 + bob, image=sprite, anchor="s", tags="band"
         )
+        if state == "idle":
+            self._draw_idle_details(musician.role, x, ground + bob, elapsed)
 
         if self.compact:
             meter_left = x - 24
@@ -588,6 +679,36 @@ class BandRenderer:
                 meter_left + 1 + 74 * activity, meter_top + 5,
                 fill=musician.color, outline="",
             )
+
+    def _draw_idle_details(self, role: str, x: float, ground: float, elapsed: float) -> None:
+        """Small procedural idle loops layered over the resting sprite."""
+
+        phase = elapsed % 6.0
+        if role == "bassist" and phase < 3.5:
+            rise = phase * 7.0
+            drift = math.sin(phase * 2.2) * 4.0
+            radius = 2.0 + phase * 0.45
+            self._oval(
+                x + 29 + drift - radius, ground - 123 - rise - radius,
+                x + 29 + drift + radius, ground - 123 - rise + radius,
+                fill="", outline="#cbd5e1", width=2,
+            )
+        elif role == "vibing":
+            tap = max(0.0, math.sin(elapsed * 1.8))
+            if tap > 0.82:
+                self._line(x + 30, ground - 2, x + 48, ground - 2,
+                           fill="#f8fafc", width=2)
+                self._line(x + 39, ground - 7, x + 39, ground + 2,
+                           fill="#f8fafc", width=2)
+            glint = 2.0 + 1.5 * math.sin(elapsed * 2.4)
+            self._oval(x - 38 - glint, ground - 60 - glint,
+                       x - 38 + glint, ground - 60 + glint,
+                       fill="#e0f2fe", outline="")
+        elif role == "singer" and phase > 4.5:
+            self._line(x - 17, ground - 111, x - 7, ground - 109,
+                       fill="#ef4444", width=2)
+            self._line(x + 7, ground - 109, x + 17, ground - 111,
+                       fill="#ef4444", width=2)
 
     def _instrument_singer(self, x, shoulder, hip, ground, activity, f, sway, elapsed):
         hand_y = shoulder + 22 - activity * 12

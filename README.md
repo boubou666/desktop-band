@@ -15,6 +15,15 @@ comme bibliothèque de fenêtre transparente.
 - séparation StemgenRT en temps réel : batterie, basse, voix et autres instruments ;
 - détection du BPM et modulation dynamique des animations ;
 - réactions contextuelles en bon langage gopnik sur les moments forts ;
+- routeur de détection V2 avec confiance temporelle, compétition entre rôles
+  voisins et états repos/groove/jeu ;
+- détection de drops avec emballement du groupe, spotlights et réplique dédiée ;
+- mise en avant automatique du soliste dominant ;
+- animations de repos procédurales : fumée, bouteille, regard et batte ;
+- packs de sprites interchangeables ;
+- icône de tray pour masquer le groupe, changer sa taille, sa sortie audio, son
+  pack et son profil de détection ;
+- mode déplacement/redimensionnement de 30 secondes depuis le tray ;
 - fenêtre transparente, toujours visible et click-through ;
 - mode démo pour essayer les animations sans configuration audio.
 
@@ -59,6 +68,53 @@ Pour afficher le BPM estimé en direct :
 python -m desktop_band --members 7 --debug
 ```
 
+Le mode debug affiche aussi les trois meilleures confiances (`I` = idle,
+`G` = groove, `P` = playing). Les calibrations fournies se choisissent avec :
+
+```powershell
+python -m desktop_band --members 7 --profile taiko
+python -m desktop_band --members 7 --profile hardbass
+python -m desktop_band --members 7 --profile soft
+```
+
+`balanced` reste le profil par défaut. Les cas taiko, hardbass, guitare et
+clavier font partie de la suite de tests afin que les réglages ne régressent
+pas silencieusement.
+
+## Contrôles du tray
+
+Un clic droit sur l'icône Desktop Band permet de :
+
+- afficher ou masquer l'overlay ;
+- activer le déplacement/redimensionnement pendant 30 secondes ;
+- passer de 1 à 7 membres sans redémarrer ;
+- suivre la sortie Windows par défaut ou choisir une sortie précise ;
+- changer de pack de sprites et de profil de détection ;
+- quitter proprement l'application.
+
+En mode déplacement, toute la fenêtre devient saisissable et le triangle en
+bas à droite sert de poignée de redimensionnement. Le click-through est remis
+automatiquement après 30 secondes. Utiliser `--no-tray` pour désactiver cette
+fonctionnalité.
+
+## Packs de sprites
+
+Le pack intégré s'appelle `gopnik`. Un pack externe est un dossier contenant
+un `manifest.json` et des feuilles de quatre colonnes. Exemple :
+
+```json
+{
+  "sheets": [
+    {"file": "bass.png", "rows": 1, "roles": {"bassist": 0}},
+    {"file": "chant.png", "rows": 1, "roles": {"singer": 0}}
+  ]
+}
+```
+
+Il se charge avec `--sprite-pack C:\chemin\vers\mon-pack`. Les packs placés
+dans `desktop_band/assets/packs/<nom>/` apparaissent aussi automatiquement
+dans le tray.
+
 Le mode StemgenRT cherche son modèle dans `models/stemgen_rt.onnx`. Le modèle
 n'est pas versionné dans ce dépôt. Sous PowerShell, il peut être récupéré
 depuis le dépôt officiel StemgenRT :
@@ -98,7 +154,8 @@ python -m compileall -q desktop_band tests
 
 - Windows est la plateforme de capture validée en priorité ;
 - StemgenRT ne sépare pas individuellement guitare, clavier et piano ;
-- le changement de composition nécessite actuellement de relancer la commande.
+- guitare et clavier restent des inférences à l'intérieur de la même piste
+  `other`, même si le routeur V2 réduit fortement les doubles détections.
 
 ## Crédits
 

@@ -43,6 +43,16 @@ class AudioFeatures:
     stem_other_low: float = 0.0
     stem_other_mid: float = 0.0
     stem_other_high: float = 0.0
+    spectral_centroid: float = 0.0
+    spectral_flatness: float = 0.0
+    pitch_stability: float = 0.0
+    note_density: float = 0.0
+    stem_other_onset: float = 0.0
+    stem_other_harmonic: float = 0.0
+    stem_other_centroid: float = 0.0
+    stem_other_flatness: float = 0.0
+    stem_other_pitch_stability: float = 0.0
+    stem_other_note_density: float = 0.0
     bpm: float = 100.0
 
 
@@ -118,6 +128,8 @@ class AudioAnalyzer:
         self._previous_low = 0.0
         self._percussive_state = 0.0
         self._spectral_history: deque[np.ndarray] = deque(maxlen=17)
+        self._pitch_history: deque[float] = deque(maxlen=10)
+        self._note_density = 0.0
 
     def process(
         self,
@@ -211,10 +223,35 @@ class AudioAnalyzer:
         if non_zero.size:
             arithmetic = float(np.mean(non_zero)) + 1e-12
             geometric = float(np.exp(np.mean(np.log(non_zero + 1e-12))))
-            tonality = _clamp(1.0 - geometric / arithmetic)
+            spectral_flatness = _clamp(geometric / arithmetic)
+            tonality = 1.0 - spectral_flatness
         else:
+            spectral_flatness = 0.0
             tonality = 0.0
         audible_mask = (frequencies >= 20) & (frequencies <= 16_000)
+        audible_magnitude = spectrum[audible_mask]
+        audible_frequencies = frequencies[audible_mask]
+        magnitude_sum = float(audible_magnitude.sum())
+        centroid_hz = (
+            float(np.dot(audible_frequencies, audible_magnitude)) / magnitude_sum
+            if magnitude_sum > 1e-12
+            else 0.0
+        )
+        spectral_centroid = _clamp(centroid_hz / 6_000.0)
+
+        pitch_mask = (frequencies >= 80) & (frequencies <= 4_000)
+        pitch_slice = spectrum[pitch_mask]
+        if active and pitch_slice.size and float(pitch_slice.max()) > 1e-9:
+            dominant_hz = float(frequencies[pitch_mask][int(np.argmax(pitch_slice))])
+            self._pitch_history.append(dominant_hz)
+        if len(self._pitch_history) >= 4:
+            pitch_values = np.asarray(self._pitch_history, dtype=np.float64)
+            coefficient = float(np.std(pitch_values) / max(1.0, np.mean(pitch_values)))
+            pitch_stability = _clamp(1.0 - coefficient / 0.48)
+        else:
+            pitch_stability = 0.0
+        density_target = _clamp(onset * 1.35 + attack * 0.55)
+        self._note_density = 0.88 * self._note_density + 0.12 * density_target
         percussive_ratio = float(percussive_power[audible_mask].sum()) / max(
             total_power, 1e-12
         )
@@ -230,6 +267,8 @@ class AudioAnalyzer:
 
         if not active:
             self._percussive_state *= 0.7
+            self._pitch_history.clear()
+            self._note_density *= 0.5
             return AudioFeatures(bpm=self._bpm)
         return AudioFeatures(
             active=True,
@@ -248,6 +287,10 @@ class AudioAnalyzer:
             harmonic_low=harmonic_low,
             harmonic_mid=harmonic_mid,
             harmonic_high=harmonic_high,
+            spectral_centroid=spectral_centroid,
+            spectral_flatness=spectral_flatness,
+            pitch_stability=pitch_stability,
+            note_density=self._note_density,
             bpm=self._bpm,
         )
 

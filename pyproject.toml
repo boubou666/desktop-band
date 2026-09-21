@@ -13,6 +13,7 @@ dependencies = [
     "numpy>=1.24",
     "onnxruntime>=1.23,<2",
     "pillow>=11,<13",
+    "pystray>=0.19.5,<0.20",
     "soundcard>=0.4.3,<0.5",
 ]
 
@@ -28,4 +29,4 @@ desktop-band = "desktop_band.__main__:main"
 include = ["desktop_band*"]
 
 [tool.setuptools.package-data]
-desktop_band = ["assets/*.png"]
+desktop_band = ["assets/*.png", "assets/packs/*/*.png", "assets/packs/*/*.json"]
