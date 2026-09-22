@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import shutil
 import unittest
+from unittest.mock import patch
 import uuid
 import wave
 
@@ -138,10 +139,22 @@ class LabWorkflowTests(unittest.TestCase):
             encoding="utf-8",
         )
         training = workspace / "training"
-        report = import_slakh(
-            workspace / "BabySlakh", training,
-            minutes_per_role=0.01, clip_seconds=0.25,
-        )
+        metadata = {
+            "audio_dir": "stems",
+            "stems": {
+                "S00": {"inst_class": "Bass", "is_drum": False},
+                "S01": {"inst_class": "Guitar", "is_drum": False},
+                "S02": {"inst_class": "Drums", "is_drum": True},
+            },
+        }
+        # PyYAML is intentionally an optional training dependency. Mock only
+        # the deserialization boundary so the importer stays covered in the
+        # default cross-platform CI environment.
+        with patch("desktop_band.slakh._load_yaml", return_value=metadata):
+            report = import_slakh(
+                workspace / "BabySlakh", training,
+                minutes_per_role=0.01, clip_seconds=0.25,
+            )
         self.assertEqual(
             {clip["exclusive_label"] for clip in report["clips"]},
             {"bassist", "guitarist", "drummer"},
