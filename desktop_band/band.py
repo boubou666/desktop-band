@@ -22,6 +22,11 @@ _MUSICIANS = {
     "vibing": Musician("vibing", "VIBE", "#a3e635"),
 }
 
+ROLE_ORDER = (
+    "vibing", "guitarist", "bassist", "singer",
+    "drummer", "percussion", "keyboard",
+)
+
 _LINEUPS = {
     1: ("singer",),
     2: ("singer", "drummer"),
@@ -59,6 +64,18 @@ def create_lineup(count: int) -> tuple[Musician, ...]:
     if count not in _LINEUPS:
         raise ValueError("le groupe doit contenir entre 1 et 7 musiciens")
     return tuple(_MUSICIANS[role] for role in _LINEUPS[count])
+
+
+def create_custom_lineup(roles) -> tuple[Musician, ...]:
+    """Build a stable left-to-right lineup from an arbitrary role selection."""
+
+    selected = {str(role) for role in roles}
+    unknown = selected.difference(_MUSICIANS)
+    if unknown:
+        raise ValueError("rôle inconnu : {}".format(sorted(unknown)[0]))
+    if not selected:
+        raise ValueError("le groupe doit contenir au moins un gopnik")
+    return tuple(_MUSICIANS[role] for role in ROLE_ORDER if role in selected)
 
 
 def role_activity(role: str, features) -> float:

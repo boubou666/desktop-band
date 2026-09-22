@@ -7,6 +7,7 @@ import math
 
 from .analysis import _clamp
 from .band import role_activity
+from .classifier import load_default_classifier
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,7 @@ class RoleDecision:
     states: dict[str, str]
     dominant_role: str | None
     dominant_confidence: float
+    model_scores: dict[str, float] | None = None
 
 
 def _blend(current: float, target: float, dt: float) -> float:
@@ -152,6 +154,7 @@ class RoleRouter:
     def __init__(self, profile: str = "balanced") -> None:
         self.profile = PROFILES.get(profile, PROFILES["balanced"])
         self._evidence: dict[str, float] = {}
+        self._classifier = load_default_classifier()
 
     def set_profile(self, profile: str) -> None:
         if profile not in PROFILES:
@@ -164,6 +167,36 @@ class RoleRouter:
 
     def update(self, features, roles, dt: float) -> RoleDecision:
         raw = role_confidences(features, self.profile)
+        model_scores = None
+        if self._classifier is not None and getattr(features, "separated", False):
+            try:
+                model_scores = self._classifier.predict(features)
+                vocal_candidate = model_scores["singer"] * max(
+                    features.stem_vocals, features.vocal * 0.35
+                )
+                bass_candidate = model_scores["bassist"] * max(
+                    features.stem_bass, features.low * features.harmonic * 0.35
+                )
+                raw["singer"] = _clamp(
+                    0.74 * raw["singer"] + 0.26 * vocal_candidate
+                )
+                raw["bassist"] = _clamp(
+                    0.74 * raw["bassist"] + 0.26 * bass_candidate
+                )
+                for role in ("drummer", "percussion"):
+                    candidate = model_scores[role] * features.stem_drums
+                    raw[role] = _clamp(0.68 * raw[role] + 0.32 * candidate)
+                for role in ("guitarist", "keyboard"):
+                    candidate = model_scores[role] * features.stem_other
+                    raw[role] = _clamp(0.68 * raw[role] + 0.32 * candidate)
+                _compete(
+                    raw, "guitarist", "keyboard", self.profile.competition_margin
+                )
+                _compete(
+                    raw, "drummer", "percussion", self.profile.competition_margin
+                )
+            except Exception:
+                model_scores = None
         for role in roles:
             self._evidence[role] = _blend(
                 self._evidence.get(role, 0.0), raw.get(role, 0.0), dt
@@ -190,4 +223,4 @@ class RoleRouter:
             runner_up = candidates[1][0] if len(candidates) > 1 else 0.0
             if confidence < 0.34 or confidence - runner_up < 0.09:
                 dominant = None
-        return RoleDecision(scores, raw, states, dominant, confidence)
+        return RoleDecision(scores, raw, states, dominant, confidence, model_scores)

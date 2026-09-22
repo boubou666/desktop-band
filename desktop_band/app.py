@@ -6,10 +6,11 @@ from dataclasses import dataclass
 import queue
 import sys
 
-from .band import create_lineup
+from .band import create_custom_lineup, create_lineup
 from .capture import DemoAudioSource, SystemAudioSource
 from .detection import PROFILES
 from .renderer import BandRenderer
+from .platform_support import set_click_through
 from .sprites import available_sprite_packs
 
 
@@ -26,6 +27,12 @@ class AppOptions:
     sprite_pack: str = "gopnik"
     detection_profile: str = "balanced"
     tray: bool = True
+    hotkeys: bool = True
+    fps: int = 30
+    eco: bool = False
+    decor: str = "none"
+    lighting: bool = True
+    variant_seed: int | None = None
 
 
 def _window_size(member_count: int, layout: str) -> tuple[int, int]:
@@ -96,6 +103,9 @@ def run(options: AppOptions) -> int:
         debug=options.debug,
         sprite_pack=options.sprite_pack,
         detection_profile=options.detection_profile,
+        decor=options.decor,
+        lighting=options.lighting,
+        variant_seed=options.variant_seed,
     )
     source.start()
 
@@ -106,34 +116,17 @@ def run(options: AppOptions) -> int:
     member_count = options.members
     selected_pack = options.sprite_pack
     selected_profile = options.detection_profile
+    selected_decor = options.decor
+    lighting_enabled = options.lighting
+    eco_mode = options.eco
+    active_roles = tuple(musician.role for musician in lineup)
     drag_state = {"mode": None, "x": 0, "y": 0, "wx": 0, "wy": 0, "w": width, "h": height}
     tray = None
+    hotkeys = None
     ui_actions: queue.SimpleQueue[tuple[object, tuple]] = queue.SimpleQueue()
 
     def schedule(callback, *args) -> None:
         ui_actions.put((callback, args))
-
-    def set_click_through(enabled: bool) -> bool:
-        if sys.platform != "win32":
-            return False
-        try:
-            import ctypes
-
-            overlay.update_idletasks()
-            hwnd = ctypes.windll.user32.GetParent(overlay.winfo_id()) or overlay.winfo_id()
-            user32 = ctypes.windll.user32
-            style = user32.GetWindowLongW(hwnd, -20)
-            transparent = 0x00000020
-            no_activate = 0x08000000
-            if enabled:
-                style |= transparent | no_activate
-            else:
-                style &= ~(transparent | no_activate)
-            user32.SetWindowLongW(hwnd, -20, style)
-            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0027)
-            return True
-        except Exception:
-            return False
 
     def end_edit_mode(generation: int | None = None) -> None:
         nonlocal editing
@@ -141,13 +134,13 @@ def run(options: AppOptions) -> int:
             return
         editing = False
         canvas.delete("edit-ui")
-        set_click_through(True)
+        set_click_through(overlay, True, renderer.width, renderer.height)
 
     def enable_edit_mode() -> None:
         nonlocal editing, edit_generation
         editing = True
         edit_generation += 1
-        set_click_through(False)
+        set_click_through(overlay, False, renderer.width, renderer.height)
         overlay.lift()
         root.after(30_000, lambda value=edit_generation: end_edit_mode(value))
 
@@ -199,6 +192,8 @@ def run(options: AppOptions) -> int:
         closing = True
         if tray is not None:
             tray.stop()
+        if hotkeys is not None:
+            hotkeys.stop()
         source.stop()
         try:
             root.destroy()
@@ -240,7 +235,10 @@ def run(options: AppOptions) -> int:
                 anchor="nw", fill="#22d3ee", font=("Segoe UI", 9, "bold"),
                 tags="edit-ui",
             )
-        root.after(33, tick)
+        target_fps = max(5, min(60, options.fps))
+        if eco_mode:
+            target_fps = min(target_fps, 18 if source.features.active else 6)
+        root.after(max(16, round(1000 / target_fps)), tick)
 
     def toggle_visible() -> None:
         nonlocal visible
@@ -251,20 +249,37 @@ def run(options: AppOptions) -> int:
         else:
             overlay.withdraw()
 
-    def set_members(count: int) -> None:
-        nonlocal member_count
+    def apply_lineup(new_lineup) -> None:
+        nonlocal member_count, active_roles
         old_width = renderer.width
-        new_width, new_height = _window_size(count, options.layout)
+        new_width, new_height = _window_size(len(new_lineup), options.layout)
         old_right = overlay.winfo_x() + old_width
         old_bottom = overlay.winfo_y() + renderer.height
-        member_count = count
-        renderer.set_lineup(create_lineup(count))
+        member_count = len(new_lineup)
+        active_roles = tuple(musician.role for musician in new_lineup)
+        renderer.set_lineup(tuple(new_lineup))
         renderer.resize(new_width, new_height)
         canvas.configure(width=new_width, height=new_height)
         window.move_window(
             overlay, new_width, new_height,
             old_right - new_width, old_bottom - new_height,
         )
+
+    def set_members(count: int) -> None:
+        apply_lineup(create_lineup(count))
+
+    def toggle_role(role: str) -> None:
+        selected = set(active_roles)
+        if role in selected:
+            if len(selected) == 1:
+                return
+            selected.remove(role)
+        else:
+            selected.add(role)
+        apply_lineup(create_custom_lineup(selected))
+
+    def next_lineup() -> None:
+        set_members(1 if member_count >= 7 else member_count + 1)
 
     def set_pack(name: str) -> None:
         nonlocal selected_pack
@@ -276,6 +291,20 @@ def run(options: AppOptions) -> int:
         nonlocal selected_profile
         renderer.set_detection_profile(name)
         selected_profile = name
+
+    def set_decor(name: str) -> None:
+        nonlocal selected_decor
+        renderer.set_decor(name)
+        selected_decor = name
+
+    def toggle_lighting() -> None:
+        nonlocal lighting_enabled
+        lighting_enabled = not lighting_enabled
+        renderer.lighting = lighting_enabled
+
+    def toggle_eco() -> None:
+        nonlocal eco_mode
+        eco_mode = not eco_mode
 
     if options.tray:
         try:
@@ -292,11 +321,19 @@ def run(options: AppOptions) -> int:
                 set_output=output_set,
                 set_pack=lambda value: schedule(set_pack, value),
                 set_profile=lambda value: schedule(set_profile, value),
+                toggle_role=lambda value: schedule(toggle_role, value),
+                set_decor=lambda value: schedule(set_decor, value),
+                toggle_lighting=lambda: schedule(toggle_lighting),
+                toggle_eco=lambda: schedule(toggle_eco),
                 quit=lambda: schedule(shutdown),
                 get_members=lambda: member_count,
                 get_output=output_get,
                 get_pack=lambda: selected_pack,
                 get_profile=lambda: selected_profile,
+                get_roles=lambda: active_roles,
+                get_decor=lambda: selected_decor,
+                get_lighting=lambda: lighting_enabled,
+                get_eco=lambda: eco_mode,
                 list_outputs=output_list,
             )
             tray = TrayController(callbacks, packs, PROFILES)
@@ -304,12 +341,31 @@ def run(options: AppOptions) -> int:
         except Exception as exc:
             renderer.sprite_error = "tray indisponible : {}".format(exc)
 
+    if options.hotkeys:
+        try:
+            from .hotkeys import GlobalHotkeys
+
+            hotkeys = GlobalHotkeys(
+                lambda: schedule(toggle_visible),
+                lambda: schedule(enable_edit_mode),
+                lambda: schedule(next_lineup),
+            )
+            hotkeys.start()
+        except Exception:
+            hotkeys = None
+
     root.protocol("WM_DELETE_WINDOW", shutdown)
     overlay.protocol("WM_DELETE_WINDOW", shutdown)
     root.after(0, tick)
     # On Windows, Tk can create the native layered window only while handling
     # its first event-loop turn. Reassert alpha/topmost once that has happened.
     root.after(120, ensure_overlay_visible)
+    root.after(
+        140,
+        lambda: set_click_through(
+            overlay, True, renderer.width, renderer.height
+        ),
+    )
     try:
         root.mainloop()
     except KeyboardInterrupt:

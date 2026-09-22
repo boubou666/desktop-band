@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Gopnik Lab can mark a complete track as one exclusive instrument, overriding
+  conflicting automatic timeline predictions during training.
+- Local Gopnik Lab annotator with audio drag-and-drop, automatic StemgenRT
+  suggestions, global instrument tags and editable timeline segments.
+- YouTube URL import through a local, gitignored `yt-dlp` audio cache.
+- Listening-first punch-in annotation controls with timeline seeking, replay,
+  play/pause, finish-and-add actions and keyboard shortcuts.
+- Dataset dashboard listing corrected tracks and per-role coverage.
+- Guarded background training with whole-track validation, baseline comparison,
+  automatic promotion only on improvement and previous-model archival.
+- Portable model export bundle containing ONNX weights, feature/label schema
+  and validation report without any training audio.
+- Six-role classifier support so vocal and bass corrections now participate in
+  learning alongside drums, percussion, guitar and keyboard.
+- Training manifest persistence and weak global-label support for tracks that
+  have not yet received detailed timeline annotations.
 - Live debug badge showing the detected musical BPM.
 - Automatic reconnection when the default Windows audio output changes.
 - Contextual gopnik speech bubbles on drops, vocal entries, bass arrivals,
@@ -35,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The debug badge now shows the top role confidences and their routing states.
 - StemgenRT's drum and `other` outputs now receive extra transient, harmonic,
   timbral, pitch-stability and note-density analysis before visual routing.
+- Bundled sprites now use the same manifest-based pack layout as external
+  packs; architecture and contribution documentation were split out of the
+  README.
+
+### Removed
+
+- Unused animal and prototype atlas files from the distributed package.
 
 ## [0.1.0] - 2026-09-21
 
@@ -51,5 +74,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compact and wide layouts, configurable monitor and screen corner.
 - Deterministic demo mode and automated unit tests.
 
-[Unreleased]: https://github.com/boubou666/desktop-band/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/boubou666/desktop-band/releases/tag/v0.1.0
+[Unreleased]: https://github.com/boubou666/gopnik-band/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/boubou666/gopnik-band/releases/tag/v0.1.0

@@ -1,8 +1,8 @@
-# Desktop Band
+# Gopnik Band
 
-Un petit groupe dessiné au-dessus du bureau et animé en fonction du son joué
-par le PC. Ce premier jet cible Windows et utilise `desktop-overlay` uniquement
-comme bibliothèque de fenêtre transparente.
+Un petit groupe de gopniks dessiné au-dessus du bureau et animé en fonction du
+son joué par le PC. L'application utilise `desktop-overlay` uniquement comme
+bibliothèque de fenêtre transparente.
 
 ## Ce que fait cette version
 
@@ -99,21 +99,14 @@ fonctionnalité.
 
 ## Packs de sprites
 
-Le pack intégré s'appelle `gopnik`. Un pack externe est un dossier contenant
-un `manifest.json` et des feuilles de quatre colonnes. Exemple :
+Le pack intégré s'appelle `gopnik`. Les packs placés dans
+`desktop_band/assets/packs/<nom>/` apparaissent automatiquement dans le tray.
+Un dossier externe se charge aussi avec
+`--sprite-pack C:\chemin\vers\mon-pack`.
 
-```json
-{
-  "sheets": [
-    {"file": "bass.png", "rows": 1, "roles": {"bassist": 0}},
-    {"file": "chant.png", "rows": 1, "roles": {"singer": 0}}
-  ]
-}
-```
-
-Il se charge avec `--sprite-pack C:\chemin\vers\mon-pack`. Les packs placés
-dans `desktop_band/assets/packs/<nom>/` apparaissent aussi automatiquement
-dans le tray.
+Le format complet du manifeste et des feuilles est documenté dans
+[`docs/SPRITE_PACKS.md`](docs/SPRITE_PACKS.md). Le fonctionnement interne est
+résumé dans [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 Le mode StemgenRT cherche son modèle dans `models/stemgen_rt.onnx`. Le modèle
 n'est pas versionné dans ce dépôt. Sous PowerShell, il peut être récupéré
@@ -150,7 +143,29 @@ python -m unittest discover -s tests -v
 python -m compileall -q desktop_band tests
 ```
 
-## Limites connues du premier jet
+## Annoter des morceaux pour améliorer la détection
+
+Gopnik Lab permet de déposer directement un MP3 ou de coller un lien YouTube,
+de laisser StemgenRT proposer les instruments et leurs passages, puis de
+corriger cette timeline :
+
+```powershell
+gopnik-band-annotator
+```
+
+L'outil fonctionne entièrement en local dans le navigateur. L'import YouTube
+est effectué par `yt-dlp` dans un cache local ; l'audio n'est envoyé à aucun
+service autre que YouTube. Gopnik Lab convertit ensuite le morceau en WAV
+d'entraînement dans `training/audio/` et maintient
+`training/annotations.json`. Ces emplacements sont ignorés par Git. Le workflow
+complet est décrit dans [`training/README.md`](training/README.md).
+Le tableau du dataset indique précisément les morceaux utilisés et leur
+couverture. L'entraînement automatisé réserve un morceau entier à la
+validation, compare le candidat au modèle actif et refuse toute régression.
+Le modèle validé s'exporte ensuite en archive ONNX autonome sans inclure les
+fichiers audio.
+
+## Limites connues
 
 - Windows est la plateforme de capture validée en priorité ;
 - StemgenRT ne sépare pas individuellement guitare, clavier et piano ;
@@ -166,4 +181,5 @@ python -m compileall -q desktop_band tests
 Les notices des dépendances tierces sont regroupées dans
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Les changements sont suivis
 selon [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) dans
-[`CHANGELOG.md`](CHANGELOG.md).
+[`CHANGELOG.md`](CHANGELOG.md). Les règles de contribution sont dans
+[`CONTRIBUTING.md`](CONTRIBUTING.md).

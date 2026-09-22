@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sys
 import threading
 import time
 
@@ -100,7 +101,12 @@ class SystemAudioSource(FeatureSource):
                     raise RuntimeError("sortie audio sélectionnée introuvable")
                 loopback = _loopback_for_speaker(sc, speaker)
                 if loopback is None:
-                    raise RuntimeError("aucune source loopback WASAPI")
+                    if sys.platform == "darwin":
+                        raise RuntimeError(
+                            "aucun périphérique de boucle audio ; installe "
+                            "BlackHole et crée une sortie multi-périphérique"
+                        )
+                    raise RuntimeError("aucune source de boucle audio système")
 
                 selected_key = _device_key(speaker)
                 selected_revision = self._selection_revision
@@ -157,13 +163,26 @@ def _speaker_for_selection(sc, selected_key: str | None):
 
 
 def _loopback_for_speaker(sc, speaker):
-    loopback = sc.get_microphone(speaker.name, include_loopback=True)
-    if loopback is not None and getattr(loopback, "isloopback", False):
+    try:
+        loopback = sc.get_microphone(speaker.name, include_loopback=True)
+    except Exception:
+        loopback = None
+    if loopback is not None and (
+        getattr(loopback, "isloopback", False)
+        or (
+            sys.platform == "darwin"
+            and _is_virtual_loopback_name(getattr(loopback, "name", ""))
+        )
+    ):
         return loopback
     candidates = [
         device
         for device in sc.all_microphones(include_loopback=True)
         if getattr(device, "isloopback", False)
+        or (
+            sys.platform == "darwin"
+            and _is_virtual_loopback_name(getattr(device, "name", ""))
+        )
     ]
     speaker_name = str(getattr(speaker, "name", "")).casefold()
     return next(
@@ -173,6 +192,14 @@ def _loopback_for_speaker(sc, speaker):
             if speaker_name and speaker_name in str(device.name).casefold()
         ),
         candidates[0] if candidates else None,
+    )
+
+
+def _is_virtual_loopback_name(name: str) -> bool:
+    normalized = str(name).casefold()
+    return any(
+        marker in normalized
+        for marker in ("blackhole", "loopback", "soundflower", "vb-cable")
     )
 
 

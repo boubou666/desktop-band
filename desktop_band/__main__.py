@@ -1,4 +1,4 @@
-"""Command-line entry point for ``python -m desktop_band``."""
+"""Command-line entry point for Gopnik Band."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from .app import AppOptions, run
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="desktop-band",
-        description="Affiche un petit groupe animé par le son du PC.",
+        prog="gopnik-band",
+        description="Affiche un groupe de gopniks animé par le son du système.",
     )
     parser.add_argument(
         "--members",
@@ -73,6 +73,40 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="désactive l'icône et les commandes de zone de notification",
     )
+    parser.add_argument(
+        "--no-hotkeys",
+        action="store_true",
+        help="désactive les raccourcis clavier globaux",
+    )
+    parser.add_argument(
+        "--fps",
+        type=int,
+        choices=range(5, 61),
+        default=30,
+        metavar="5..60",
+        help="limite de rendu en images par seconde (défaut : 30)",
+    )
+    parser.add_argument(
+        "--eco",
+        action="store_true",
+        help="réduit automatiquement le FPS, surtout pendant le silence",
+    )
+    parser.add_argument(
+        "--decor",
+        choices=("none", "garage", "panelki"),
+        default="none",
+        help="décor optionnel derrière le groupe",
+    )
+    parser.add_argument(
+        "--no-lighting",
+        action="store_true",
+        help="désactive l'éclairage musical",
+    )
+    parser.add_argument(
+        "--variant-seed",
+        type=int,
+        help="graine reproductible pour les variantes visuelles",
+    )
     return parser
 
 
@@ -91,6 +125,12 @@ def main() -> int:
             sprite_pack=args.sprite_pack,
             detection_profile=args.profile,
             tray=not args.no_tray,
+            hotkeys=not args.no_hotkeys,
+            fps=args.fps,
+            eco=args.eco,
+            decor=args.decor,
+            lighting=not args.no_lighting,
+            variant_seed=args.variant_seed,
         )
     )
 

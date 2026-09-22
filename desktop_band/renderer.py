@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 import time
 import tkinter as tk
 
@@ -12,8 +13,8 @@ from .band import Musician, gated_activity
 from .detection import RoleRouter
 from .moments import MusicalMomentDetector
 from .reactions import ShoutDetector, ShoutEvent
-from .sprites import SPRITE_SHEETS as _SPRITE_SHEETS
 from .sprites import load_sprite_pack
+from .stage import StageDirector
 
 
 SKIN = "#f3c6a5"
@@ -132,6 +133,9 @@ class BandRenderer:
         debug: bool = False,
         sprite_pack: str = "gopnik",
         detection_profile: str = "balanced",
+        decor: str = "none",
+        lighting: bool = True,
+        variant_seed: int | None = None,
     ):
         self.canvas = canvas
         self.lineup = lineup
@@ -140,6 +144,8 @@ class BandRenderer:
         self.compact = compact
         self.debug = debug
         self.sprite_pack = sprite_pack
+        self.decor = decor
+        self.lighting = lighting
         self._frame_size = 166 if compact else 220
         self._sprite_size = 158 if compact else 210
         self.started = time.monotonic()
@@ -150,11 +156,13 @@ class BandRenderer:
         self._shout_detector = ShoutDetector()
         self._moment_detector = MusicalMomentDetector()
         self._role_router = RoleRouter(detection_profile)
+        self._stage_director = StageDirector(variant_seed)
         self._last_decision = None
         self._shout_event = None
         self._shout_until = 0.0
         self.sprite_error = None
         self._sprite_frames = self._load_sprite_frames()
+        self._decor_image = self._load_decor_image(decor)
 
     def set_lineup(self, lineup: tuple[Musician, ...]) -> None:
         self.lineup = lineup
@@ -166,6 +174,11 @@ class BandRenderer:
     def resize(self, width: int, height: int) -> None:
         self.width = max(220, int(width))
         self.height = max(180, int(height))
+        self._decor_image = self._load_decor_image(self.decor)
+
+    def set_decor(self, decor: str) -> None:
+        self.decor = decor
+        self._decor_image = self._load_decor_image(decor)
 
     def set_detection_profile(self, profile: str) -> None:
         self._role_router.set_profile(profile)
@@ -285,6 +298,23 @@ class BandRenderer:
             self.sprite_error = "sprites indisponibles : {}".format(exc)
             return {}
 
+    def _load_decor_image(self, decor: str):
+        if decor == "none":
+            return None
+        path = Path(__file__).with_name("assets") / "decors" / (decor + ".png")
+        if not path.is_file():
+            return None
+        try:
+            from PIL import Image, ImageTk
+
+            with Image.open(path) as source:
+                image = source.convert("RGBA")
+            image.thumbnail((self.width, self.height), Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(image, master=self.canvas)
+        except Exception as exc:
+            self.sprite_error = "décor indisponible : {}".format(exc)
+            return None
+
     @staticmethod
     def _remove_neighbor_fragments(
         crop,
@@ -363,6 +393,10 @@ class BandRenderer:
             musician.role: margin + spacing * (index + 0.5)
             for index, musician in enumerate(self.lineup)
         }
+        stage_event = self._stage_director.update(features, decision, now)
+        self._draw_decor()
+        if self.lighting and features.active:
+            self._draw_musical_lighting(features, elapsed)
         if drop_active:
             self._draw_drop_spotlight(elapsed)
 
@@ -381,6 +415,8 @@ class BandRenderer:
                 self._playing[index] = False
             if drop_active and musician.role != "singer":
                 target = max(target, 0.58)
+            if stage_event is not None and stage_event.kind == "squat_wave":
+                target = max(target, 0.72)
             attack, release = _ACTIVITY_ENVELOPES.get(
                 musician.role, (0.14, 0.28)
             )
@@ -406,13 +442,19 @@ class BandRenderer:
         for index in draw_order:
             musician = self.lineup[index]
             x = role_positions[musician.role]
+            stage_x, stage_y = self._stage_offset(
+                musician.role, index, stage_event, elapsed
+            )
             self._draw_musician(
-                musician, x, ground, elapsed, features, index,
+                musician, x + stage_x, ground + stage_y, elapsed, features, index,
                 self._activity[index],
                 state=decision.states[musician.role],
                 solo=musician.role == dominant,
                 drop_active=drop_active,
             )
+
+        if stage_event is not None:
+            self._draw_stage_event(stage_event, role_positions, elapsed)
 
         if not drop_active:
             shout = self._shout_detector.update(features, role_scores, now)
@@ -479,6 +521,73 @@ class BandRenderer:
                    fill=color, width=4)
         self._oval(center - 180, self.height - 34, center + 180, self.height - 15,
                    fill="", outline=color, width=3)
+
+    def _draw_decor(self) -> None:
+        if self._decor_image is not None:
+            self.canvas.create_image(
+                self.width / 2, self.height,
+                image=self._decor_image, anchor="s", tags="band",
+            )
+
+    def _draw_musical_lighting(self, features, elapsed: float) -> None:
+        warm = features.low >= features.high
+        colors = ("#ef4444", "#f59e0b") if warm else ("#06b6d4", "#8b5cf6")
+        sweep = math.sin(elapsed * (0.8 + features.bpm / 180.0)) * self.width * 0.12
+        center = self.width / 2
+        intensity = max(1, round(1 + features.level * 4))
+        self._line(center - 190 + sweep, 0, center - 55, self.height - 18,
+                   fill=colors[0], width=intensity)
+        self._line(center + 190 - sweep, 0, center + 55, self.height - 18,
+                   fill=colors[1], width=intensity)
+        if features.onset > 0.55:
+            radius = 32 + features.onset * 28
+            self._oval(center - radius, 22 - radius / 3,
+                       center + radius, 22 + radius / 3,
+                       fill="", outline="#f8fafc", width=2)
+
+    @staticmethod
+    def _stage_offset(role: str, index: int, event, elapsed: float) -> tuple[float, float]:
+        if event is None:
+            return 0.0, 0.0
+        if event.kind == "squat_wave":
+            wave = max(0.0, math.sin(elapsed * 7.0 - index * 0.8))
+            return 0.0, wave * 7.0
+        if role not in event.roles:
+            return 0.0, 0.0
+        if event.kind in {"fist_bump", "nod", "challenge"}:
+            direction = 1.0 if role == event.roles[0] else -1.0
+            return direction * 5.0, -2.0 * abs(math.sin(elapsed * 5.0))
+        if event.kind == "vodka_toast":
+            return 0.0, -5.0 * abs(math.sin(elapsed * 4.0))
+        return 0.0, 0.0
+
+    def _draw_stage_event(self, event, role_positions: dict[str, float], elapsed: float) -> None:
+        if event.kind in {"fist_bump", "nod", "challenge"} and len(event.roles) >= 2:
+            left = role_positions.get(event.roles[0], self.width / 2)
+            right = role_positions.get(event.roles[1], self.width / 2)
+            midpoint = (left + right) / 2
+            self._line(left, self.height - 96, midpoint, self.height - 112,
+                       fill="#f8fafc", width=2, dash=(5, 3))
+            self._line(right, self.height - 96, midpoint, self.height - 112,
+                       fill="#f8fafc", width=2, dash=(5, 3))
+        elif event.kind == "vodka_toast":
+            x = role_positions.get("vibing", self.width / 2)
+            self._rectangle(x - 7, 39, x + 7, 68,
+                            fill="#dbeafe", outline="#f8fafc", width=2)
+        elif event.kind == "bat_tap":
+            x = role_positions.get("vibing", self.width / 2)
+            radius = 10 + 8 * abs(math.sin(elapsed * 9.0))
+            self._oval(x - radius, self.height - 30 - radius / 3,
+                       x + radius, self.height - 30 + radius / 3,
+                       fill="", outline="#facc15", width=3)
+        elif event.kind == "red_alert":
+            inset = 5 + 3 * abs(math.sin(elapsed * 10.0))
+            self._rectangle(inset, inset, self.width - inset, self.height - inset,
+                            fill="", outline="#ef4444", width=4)
+        self._text(
+            self.width / 2, 39, event.text, anchor="n",
+            fill="#f8fafc", font=("Segoe UI", 10, "bold"),
+        )
 
     def _draw_shout(self, event, role_positions: dict[str, float]) -> None:
         target_x = role_positions.get(event.role, self.width / 2)
@@ -641,6 +750,10 @@ class BandRenderer:
         self.canvas.create_image(
             x, ground + 5 + bob, image=sprite, anchor="s", tags="band"
         )
+        self._draw_variant(
+            self._stage_director.variant_for(musician.role),
+            x, ground + bob, elapsed,
+        )
         if state == "idle":
             self._draw_idle_details(musician.role, x, ground + bob, elapsed)
 
@@ -709,6 +822,23 @@ class BandRenderer:
                        fill="#ef4444", width=2)
             self._line(x + 7, ground - 109, x + 17, ground - 111,
                        fill="#ef4444", width=2)
+
+    def _draw_variant(self, variant: str, x: float, ground: float, elapsed: float) -> None:
+        if variant == "gold":
+            self._arc(x - 15, ground - 91, x + 15, ground - 62,
+                      start=195, extent=150, outline="#facc15", width=3)
+        elif variant == "red_star":
+            self._text(x, ground - 137, "★", anchor="center",
+                       fill="#ef4444", font=("Segoe UI Symbol", 10, "bold"))
+        elif variant == "bandana":
+            self._line(x - 22, ground - 119, x + 22, ground - 117,
+                       fill="#dc2626", width=4)
+        elif variant == "extra_smoke":
+            phase = elapsed % 4.0
+            radius = 2.0 + phase * 0.55
+            self._oval(x + 24 - radius, ground - 115 - phase * 8 - radius,
+                       x + 24 + radius, ground - 115 - phase * 8 + radius,
+                       fill="", outline="#e2e8f0", width=2)
 
     def _instrument_singer(self, x, shoulder, hip, ground, activity, f, sway, elapsed):
         hand_y = shoulder + 22 - activity * 12

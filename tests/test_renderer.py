@@ -1,10 +1,10 @@
 import unittest
 
 from desktop_band.renderer import (
-    _SPRITE_SHEETS,
     _role_frame_rate,
     _smooth_activity,
 )
+from desktop_band.sprites import load_sprite_pack
 
 
 class VisualEnvelopeTests(unittest.TestCase):
@@ -57,8 +57,8 @@ class VisualEnvelopeTests(unittest.TestCase):
 
     def test_every_role_has_at_least_eight_sprite_frames(self):
         frame_counts = {}
-        for _filename, _rows, role_rows in _SPRITE_SHEETS:
-            for role in role_rows:
+        for sheet in load_sprite_pack("gopnik"):
+            for role in sheet.role_rows:
                 frame_counts[role] = frame_counts.get(role, 0) + 4
         self.assertEqual(
             set(frame_counts),

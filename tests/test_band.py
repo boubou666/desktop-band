@@ -1,7 +1,12 @@
 import unittest
 
 from desktop_band.analysis import AudioFeatures
-from desktop_band.band import create_lineup, gated_activity, role_activity
+from desktop_band.band import (
+    create_custom_lineup,
+    create_lineup,
+    gated_activity,
+    role_activity,
+)
 
 
 class BandTests(unittest.TestCase):
@@ -13,6 +18,17 @@ class BandTests(unittest.TestCase):
     def test_invalid_lineup_is_rejected(self):
         with self.assertRaises(ValueError):
             create_lineup(0)
+
+    def test_custom_lineup_keeps_stage_order(self):
+        lineup = create_custom_lineup(("keyboard", "vibing", "singer"))
+        self.assertEqual(
+            tuple(musician.role for musician in lineup),
+            ("vibing", "singer", "keyboard"),
+        )
+
+    def test_custom_lineup_cannot_be_empty(self):
+        with self.assertRaises(ValueError):
+            create_custom_lineup(())
 
     def test_bass_responds_more_to_low_energy(self):
         low = AudioFeatures(

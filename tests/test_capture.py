@@ -1,6 +1,11 @@
 import unittest
 
-from desktop_band.capture import _device_key, _loopback_for_speaker, _speaker_for_selection
+from desktop_band.capture import (
+    _device_key,
+    _is_virtual_loopback_name,
+    _loopback_for_speaker,
+    _speaker_for_selection,
+)
 
 
 class _Device:
@@ -45,6 +50,11 @@ class DynamicOutputTests(unittest.TestCase):
         sc = _SoundCard(speakers=speakers)
         self.assertIs(_speaker_for_selection(sc, None), speakers[0])
         self.assertIs(_speaker_for_selection(sc, "usb"), speakers[1])
+
+    def test_common_macos_virtual_devices_are_recognized(self):
+        self.assertTrue(_is_virtual_loopback_name("BlackHole 2ch"))
+        self.assertTrue(_is_virtual_loopback_name("Soundflower64"))
+        self.assertFalse(_is_virtual_loopback_name("Built-in Microphone"))
 
 
 if __name__ == "__main__":

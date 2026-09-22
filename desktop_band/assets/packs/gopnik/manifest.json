@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "Gopnik",
+  "sheets": [
+    {"file": "gopnik_bassist.png", "rows": 1, "roles": {"bassist": 0}},
+    {"file": "gopnik_bassist_extra.png", "rows": 1, "roles": {"bassist": 0}},
+    {"file": "gopnik_singer_base.png", "rows": 1, "roles": {"singer": 0}},
+    {"file": "gopnik_singer_mouths.png", "rows": 1, "roles": {"singer": 0}},
+    {"file": "gopnik_drummer.png", "rows": 1, "roles": {"drummer": 0}},
+    {"file": "gopnik_drummer_extra.png", "rows": 1, "roles": {"drummer": 0}},
+    {"file": "gopnik_keyboard.png", "rows": 1, "roles": {"keyboard": 0}},
+    {"file": "gopnik_keyboard_extra.png", "rows": 1, "roles": {"keyboard": 0}},
+    {"file": "gopnik_guitarist.png", "rows": 1, "roles": {"guitarist": 0}},
+    {"file": "gopnik_guitarist_extra.png", "rows": 1, "roles": {"guitarist": 0}},
+    {"file": "gopnik_percussion.png", "rows": 1, "roles": {"percussion": 0}},
+    {"file": "gopnik_percussion_extra.png", "rows": 1, "roles": {"percussion": 0}},
+    {"file": "gopnik_vibe_dance_left.png", "rows": 1, "roles": {"vibing": 0}},
+    {"file": "gopnik_vibe_dance_right.png", "rows": 1, "roles": {"vibing": 0}}
+  ]
+}

@@ -15,11 +15,19 @@ class TrayCallbacks:
     set_output: Callable[[str | None], None]
     set_pack: Callable[[str], None]
     set_profile: Callable[[str], None]
+    toggle_role: Callable[[str], None]
+    set_decor: Callable[[str], None]
+    toggle_lighting: Callable[[], None]
+    toggle_eco: Callable[[], None]
     quit: Callable[[], None]
     get_members: Callable[[], int]
     get_output: Callable[[], str | None]
     get_pack: Callable[[], str]
     get_profile: Callable[[], str]
+    get_roles: Callable[[], tuple[str, ...]]
+    get_decor: Callable[[], str]
+    get_lighting: Callable[[], bool]
+    get_eco: Callable[[], bool]
     list_outputs: Callable[[], tuple[tuple[str, str], ...]]
 
 
@@ -66,6 +74,11 @@ class TrayController:
                     return getter() == value
                 return checked
 
+            def contains(getter, value):
+                def checked(_item):
+                    return value in getter()
+                return checked
+
             members = pystray.Menu(*(
                 pystray.MenuItem(
                     "{} gopnik{}".format(count, "s" if count > 1 else ""),
@@ -75,9 +88,26 @@ class TrayController:
                 )
                 for count in range(1, 8)
             ))
+            role_labels = {
+                "vibing": "Danseur",
+                "guitarist": "Guitariste",
+                "bassist": "Bassiste",
+                "singer": "Chanteur",
+                "drummer": "Batteur",
+                "percussion": "Percussionniste",
+                "keyboard": "Claviériste",
+            }
+            roles = pystray.Menu(*(
+                pystray.MenuItem(
+                    label,
+                    choose(self.callbacks.toggle_role, role),
+                    checked=contains(self.callbacks.get_roles, role),
+                )
+                for role, label in role_labels.items()
+            ))
             outputs = [
                 pystray.MenuItem(
-                    "Sortie Windows par défaut",
+                    "Sortie système par défaut",
                     lambda _icon, _item: self.callbacks.set_output(None),
                     checked=lambda _item: self.callbacks.get_output() is None,
                     radio=True,
@@ -110,17 +140,42 @@ class TrayController:
                 )
                 for name in self.profiles
             ))
+            decors = pystray.Menu(*(
+                pystray.MenuItem(
+                    label,
+                    choose(self.callbacks.set_decor, value),
+                    checked=is_selected(self.callbacks.get_decor, value),
+                    radio=True,
+                )
+                for value, label in (
+                    ("none", "Aucun"),
+                    ("garage", "Garage"),
+                    ("panelki", "Blocs soviétiques"),
+                )
+            ))
             menu = pystray.Menu(
                 pystray.MenuItem("Afficher / masquer", lambda _i, _m: self.callbacks.toggle_visible()),
                 pystray.MenuItem("Déplacer / redimensionner (30 s)", lambda _i, _m: self.callbacks.enable_edit()),
-                pystray.MenuItem("Taille du groupe", members),
+                pystray.MenuItem("Membres du groupe", roles),
+                pystray.MenuItem("Compositions rapides", members),
                 pystray.MenuItem("Sortie audio", pystray.Menu(*outputs)),
                 pystray.MenuItem("Pack de sprites", packs),
                 pystray.MenuItem("Profil de détection", profiles),
+                pystray.MenuItem("Décor", decors),
+                pystray.MenuItem(
+                    "Éclairage musical",
+                    lambda _i, _m: self.callbacks.toggle_lighting(),
+                    checked=lambda _item: self.callbacks.get_lighting(),
+                ),
+                pystray.MenuItem(
+                    "Mode économie CPU",
+                    lambda _i, _m: self.callbacks.toggle_eco(),
+                    checked=lambda _item: self.callbacks.get_eco(),
+                ),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Quitter", lambda _i, _m: self.callbacks.quit()),
             )
-            self._icon = pystray.Icon("desktop-band", image, "Desktop Band", menu)
+            self._icon = pystray.Icon("gopnik-band", image, "Gopnik Band", menu)
             self._icon.run()
         except Exception as exc:
             self.error = str(exc)

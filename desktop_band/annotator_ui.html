@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gopnik Band — Annotateur</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f5f1df;
+      --muted: #a9a797;
+      --panel: #181a1b;
+      --panel2: #222526;
+      --line: #3c403e;
+      --red: #e44231;
+      --gold: #f4c542;
+      --green: #70b85d;
+      --blue: #4da3d9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        linear-gradient(135deg, rgba(228,66,49,.08), transparent 30%),
+        radial-gradient(circle at 90% 0, rgba(244,197,66,.06), transparent 24%),
+        #101213;
+      font: 15px/1.45 Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    .shell { width: min(1280px, calc(100% - 32px)); margin: 26px auto 48px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+    h1 { margin: 0; font-size: clamp(28px, 5vw, 52px); line-height: .95; letter-spacing: -.04em; }
+    h1 span { color: var(--red); }
+    header p { color: var(--muted); max-width: 510px; margin: 0; text-align: right; }
+    .card {
+      margin-top: 18px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--panel) 94%, transparent);
+      box-shadow: 0 16px 50px rgba(0,0,0,.25);
+    }
+    #drop {
+      display: grid;
+      place-items: center;
+      min-height: 150px;
+      border: 2px dashed #555a56;
+      border-radius: 11px;
+      text-align: center;
+      cursor: pointer;
+      transition: .16s ease;
+    }
+    #drop.drag { border-color: var(--gold); background: rgba(244,197,66,.08); transform: scale(1.005); }
+    #drop strong { display: block; font-size: 20px; }
+    #drop small { color: var(--muted); }
+    input[type=file] { display: none; }
+    .or { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+    .or::before, .or::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+    .url-row { display: flex; gap: 9px; }
+    .url-row input { min-width: 0; flex: 1; padding: 11px 13px; color: var(--ink); background: #101212; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+    button, .button-link {
+      border: 1px solid #575c58;
+      border-radius: 8px;
+      padding: 9px 13px;
+      color: var(--ink);
+      background: #292d2c;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    button:hover, .button-link:hover { border-color: #8a908b; background: #313634; }
+    button.primary { border-color: #ff6a58; background: var(--red); }
+    button.primary:hover { background: #f05240; }
+    button:disabled { opacity: .4; cursor: wait; }
+    .hidden { display: none !important; }
+    .status { margin-top: 12px; color: var(--muted); min-height: 22px; }
+    .status.busy::before { content: "◌"; display: inline-block; margin-right: 7px; animation: spin .8s linear infinite; }
+    .status.ok { color: #85d975; }
+    .status.error { color: #ff7766; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .topline { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .filename { font-weight: 800; font-size: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .engine { color: var(--muted); font-size: 13px; }
+    audio { width: 100%; margin-top: 12px; height: 38px; }
+    h2 { margin: 0 0 12px; font-size: 16px; text-transform: uppercase; letter-spacing: .09em; color: var(--gold); }
+    .checks { display: flex; flex-wrap: wrap; gap: 8px; }
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      user-select: none;
+    }
+    .check input { accent-color: var(--red); }
+    .exclusive-row { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 13px; padding: 11px 13px; border: 1px solid #685f36; border-radius: 9px; background: rgba(244,197,66,.06); }
+    .exclusive-row input { accent-color: var(--gold); }
+    .exclusive-row select { padding: 7px 9px; color: var(--ink); background: #111313; border: 1px solid var(--line); border-radius: 7px; font: inherit; }
+    .timeline-wrap { position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #0d0f0f; }
+    canvas { width: 100%; height: 370px; display: block; touch-action: none; cursor: crosshair; }
+    .legend { display: grid; grid-template-columns: repeat(6, minmax(100px,1fr)); gap: 5px; margin-top: 9px; font-size: 12px; color: var(--muted); }
+    .legend span::before { content: ""; width: 9px; height: 9px; display: inline-block; margin-right: 5px; border-radius: 2px; background: var(--c); }
+    .editor { display: grid; grid-template-columns: 140px 140px 1fr auto; gap: 12px; align-items: end; }
+    .capture-card { position: sticky; top: 8px; z-index: 10; border-color: #685f36; }
+    .instrument-picker { display: grid; grid-template-columns: repeat(6,minmax(105px,1fr)); gap: 7px; }
+    .instrument {
+      position: relative; display: flex; align-items: center; justify-content: center; gap: 7px;
+      min-height: 46px; padding: 8px; border: 1px solid var(--line); border-radius: 8px;
+      background: var(--panel2); cursor: pointer; font-weight: 750; text-align: center;
+    }
+    .instrument:has(input:checked) { border-color: var(--role); background: color-mix(in srgb,var(--role) 24%,#202323); box-shadow: inset 0 0 0 1px var(--role); }
+    .instrument input { position: absolute; opacity: 0; }
+    kbd { padding: 1px 5px; border: 1px solid #666; border-radius: 4px; color: var(--muted); background: #111; font: 11px/1.4 ui-monospace,monospace; }
+    .transport { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; margin-top: 14px; }
+    .clock { min-width: 130px; font: 800 29px/1 ui-monospace,monospace; color: var(--gold); }
+    .transport-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+    .transport-buttons button { min-height: 44px; }
+    #finishSegment { background: var(--green); border-color: #9be68a; color: #101310; }
+    .capture-state { grid-column: 1 / -1; color: var(--muted); }
+    label.field { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+    input[type=number] { width: 100%; padding: 9px; color: var(--ink); background: #101212; border: 1px solid var(--line); border-radius: 7px; font: inherit; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .hint { margin-top: 10px; color: var(--muted); font-size: 13px; }
+    .savebar { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    #segmentCount { color: var(--muted); }
+    .dataset-head { display: flex; justify-content: space-between; gap: 14px; align-items: start; }
+    .dataset-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .table-wrap { overflow-x: auto; margin-top: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .tag { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 7px; border-radius: 999px; background: #2b302e; font-size: 11px; }
+    progress { width: 100%; height: 9px; margin-top: 8px; accent-color: var(--green); }
+    @media (max-width: 800px) {
+      header { align-items: start; flex-direction: column; }
+      header p { text-align: left; }
+      .editor { grid-template-columns: 1fr 1fr; }
+      .editor .checks, .editor .actions { grid-column: 1 / -1; }
+      .instrument-picker { grid-template-columns: repeat(2,1fr); }
+      .transport { grid-template-columns: 1fr; }
+      .legend { grid-template-columns: repeat(2,1fr); }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <h1>GOPNIK <span>LAB</span></h1>
+      <p>Tu corriges le commissaire musical. Tout reste sur cette machine&nbsp;: le navigateur parle seulement au serveur local.</p>
+    </header>
+
+    <section class="card" id="dropCard">
+      <label id="drop" for="fileInput">
+        <div><strong>Dépose un MP3 ici, camarade</strong><small>MP3, WAV, FLAC, M4A — décodé localement dans le navigateur</small></div>
+      </label>
+      <input id="fileInput" type="file" accept="audio/*,.mp3,.wav,.flac,.m4a,.webm,.ogg">
+      <div class="or">OU</div>
+      <div class="url-row">
+        <input id="youtubeUrl" type="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+        <button id="youtubeLoad" class="primary">Importer YouTube</button>
+      </div>
+      <div id="importStatus" class="status">L’analyse se lancera automatiquement après le drop.</div>
+    </section>
+
+    <div id="workspace" class="hidden">
+      <section class="card">
+        <div class="topline">
+          <div><div class="filename" id="filename"></div><div class="engine" id="engine"></div></div>
+          <button id="changeFile">Changer de morceau</button>
+        </div>
+        <audio id="player" controls></audio>
+      </section>
+
+      <section class="card">
+        <h2>Instruments présents dans le morceau</h2>
+        <div id="globalChecks" class="checks"></div>
+        <div class="exclusive-row">
+          <input id="exclusiveMode" type="checkbox">
+          <label for="exclusiveMode"><strong>Morceau mono-instrument :</strong> ignorer les autres prédictions et entraîner uniquement</label>
+          <select id="exclusiveRole" aria-label="Instrument unique"></select>
+        </div>
+      </section>
+
+      <section class="card capture-card">
+        <h2>Mode punch-in — écoute et marque le passage</h2>
+        <div id="segmentChecks" class="instrument-picker"></div>
+        <div class="transport">
+          <div id="clock" class="clock">0:00.00</div>
+          <div class="transport-buttons">
+            <button id="rewind3">−3 s</button>
+            <button id="replayStart">↺ Lire depuis le début</button>
+            <button id="togglePlay" class="primary">▶ Lecture</button>
+            <button id="markStart">● Début maintenant</button>
+            <button id="finishSegment">■ Fin ici + ajouter</button>
+          </div>
+          <div id="captureState" class="capture-state">1. Choisis un instrument · 2. clique sur la timeline · 3. lis le passage · 4. termine ici.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Timeline proposée par l’IA</h2>
+        <div class="timeline-wrap"><canvas id="timeline"></canvas></div>
+        <div id="legend" class="legend"></div>
+        <div class="hint">Glisse sur la timeline pour sélectionner une zone. Clique sur un bloc pour le modifier. Clique pendant la lecture pour déplacer le curseur.</div>
+      </section>
+
+      <section class="card">
+        <h2>Ajustement précis du passage</h2>
+        <div class="editor">
+          <label class="field">Début (secondes)<input id="start" type="number" min="0" step="0.01" value="0"></label>
+          <label class="field">Fin (secondes)<input id="end" type="number" min="0" step="0.01" value="1"></label>
+          <div class="actions">
+            <button id="applySegment" class="primary">Ajouter</button>
+            <button id="deleteSegment" disabled>Supprimer</button>
+            <button id="cancelEdit" disabled>Annuler édition</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card savebar">
+        <div><strong id="segmentCount">0 passage</strong><div id="saveStatus" class="status">Les suggestions automatiques ne sont enregistrées qu’après ta validation.</div></div>
+        <button id="save" class="primary">Enregistrer les corrections</button>
+      </section>
+    </div>
+
+      <section class="card">
+        <div class="dataset-head">
+          <div><h2>Dataset du commissaire</h2><div id="datasetSummary" class="engine">Chargement…</div></div>
+          <div class="dataset-actions">
+            <button id="trainModel">Entraîner un candidat</button>
+            <a class="button-link" href="/api/model-export">Exporter le modèle</a>
+          </div>
+        </div>
+        <div id="trainingStatus" class="status">Aucun entraînement lancé.</div>
+        <progress id="trainingProgress" max="100" value="0"></progress>
+        <div class="table-wrap">
+          <table><thead><tr><th>Morceau</th><th>Durée</th><th>Passages</th><th>Couverture corrigée</th></tr></thead><tbody id="datasetRows"></tbody></table>
+        </div>
+      </section>
+  </main>
+
+  <script>
+    const ROLES = [
+      ['singer','Chant','#ef476f'], ['drummer','Batterie','#ffd166'],
+      ['bassist','Basse','#06d6a0'], ['keyboard','Clavier / synthé','#118ab2'],
+      ['guitarist','Guitare','#9b5de5'], ['percussion','Percussions','#f9844a']
+    ];
+    const $ = id => document.getElementById(id);
+    const state = { file:null, audioName:null, duration:0, segments:[], peaks:[], selection:null, editing:-1, objectUrl:null };
+    const roleColor = Object.fromEntries(ROLES.map(x => [x[0],x[2]]));
+    const roleLabel = Object.fromEntries(ROLES.map(x => [x[0],x[1]]));
+
+    function buildChecks(target, prefix) {
+      target.innerHTML = ROLES.map(([role,label]) => `<label class="check"><input type="checkbox" data-role="${role}" id="${prefix}-${role}">${label}</label>`).join('');
+    }
+    buildChecks($('globalChecks'),'global');
+    $('exclusiveRole').innerHTML = ROLES.map(([role,label])=>`<option value="${role}">${label}</option>`).join('');
+    $('segmentChecks').innerHTML = ROLES.map(([role,label,color],index) => `<label class="instrument" style="--role:${color}"><input type="radio" name="capture-role" data-role="${role}" id="segment-${role}"><kbd>${index+1}</kbd>${label}</label>`).join('');
+    $('legend').innerHTML = ROLES.map(([role,label,color]) => `<span style="--c:${color}">${label}</span>`).join('');
+
+    function selected(prefix) {
+      return ROLES.map(x => x[0]).filter(role => $(`${prefix}-${role}`).checked);
+    }
+    function setSelected(prefix, roles) {
+      const wanted = new Set(roles || []);
+      ROLES.forEach(([role]) => $(`${prefix}-${role}`).checked = wanted.has(role));
+    }
+    function syncExclusiveMode(){const enabled=$('exclusiveMode').checked,role=$('exclusiveRole').value;$('exclusiveRole').disabled=!enabled;document.querySelectorAll('#globalChecks input').forEach(input=>input.disabled=enabled);if(enabled)setSelected('global',[role]);}
+    $('exclusiveMode').addEventListener('change',syncExclusiveMode);
+    $('exclusiveRole').addEventListener('change',syncExclusiveMode);
+    syncExclusiveMode();
+    function status(el, message, kind='') { el.textContent = message; el.className = `status ${kind}`; }
+    function formatTime(value) {
+      const mins = Math.floor(value / 60); const secs = value - mins * 60;
+      return `${mins}:${secs.toFixed(1).padStart(4,'0')}`;
+    }
+
+    async function normalizeAudio(file) {
+      const context = new (window.AudioContext || window.webkitAudioContext)();
+      const decoded = await context.decodeAudioData(await file.arrayBuffer());
+      const frames = Math.max(1, Math.ceil(decoded.duration * 44100));
+      const offline = new OfflineAudioContext(2, frames, 44100);
+      const source = offline.createBufferSource();
+      source.buffer = decoded; source.connect(offline.destination); source.start();
+      const rendered = await offline.startRendering();
+      await context.close();
+      state.peaks = waveformPeaks(rendered, 1600);
+      return { blob: encodeWav(rendered), duration: rendered.duration };
+    }
+
+    function encodeWav(buffer) {
+      const channels = 2, length = buffer.length, bytes = 44 + length * channels * 2;
+      const raw = new ArrayBuffer(bytes), view = new DataView(raw);
+      const text = (offset,value) => [...value].forEach((char,i) => view.setUint8(offset+i,char.charCodeAt(0)));
+      text(0,'RIFF'); view.setUint32(4,bytes-8,true); text(8,'WAVE'); text(12,'fmt ');
+      view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,channels,true);
+      view.setUint32(24,44100,true); view.setUint32(28,44100*channels*2,true);
+      view.setUint16(32,channels*2,true); view.setUint16(34,16,true); text(36,'data'); view.setUint32(40,bytes-44,true);
+      const left = buffer.getChannelData(0), right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : left;
+      let offset = 44;
+      for (let i=0; i<length; i++) for (const sample of [left[i],right[i]]) {
+        const clamped = Math.max(-1,Math.min(1,sample));
+        view.setInt16(offset, clamped < 0 ? clamped*32768 : clamped*32767, true); offset += 2;
+      }
+      return new Blob([raw],{type:'audio/wav'});
+    }
+
+    function waveformPeaks(buffer, count) {
+      const data = buffer.getChannelData(0), step = Math.max(1,Math.floor(data.length/count)), peaks=[];
+      for (let i=0;i<data.length;i+=step) {
+        let peak=0; for (let j=i;j<Math.min(i+step,data.length);j++) peak=Math.max(peak,Math.abs(data[j]));
+        peaks.push(peak);
+      }
+      return peaks;
+    }
+
+    async function loadFile(file) {
+      if (!file || !file.type.startsWith('audio/') && !/\.(mp3|wav|flac|m4a|webm|ogg)$/i.test(file.name)) {
+        status($('importStatus'),'Ce fichier ne ressemble pas à de l’audio, blyat.','error'); return;
+      }
+      state.file = file;
+      state.segments = []; state.selection = null; state.editing = -1; state.peaks = []; state.duration = 0;
+      if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+      state.objectUrl = URL.createObjectURL(file);
+      $('player').src = state.objectUrl; $('filename').textContent = file.name;
+      $('engine').textContent = 'Pré-analyse en cours… tu peux déjà écouter le morceau.';
+      $('workspace').classList.remove('hidden'); $('dropCard').classList.add('hidden');
+      updateEditor(); resizeCanvas(); draw();
+      status($('saveStatus'),'Décodage local puis analyse automatique avec StemgenRT…','busy');
+      status($('importStatus'),'Décodage local et préparation du WAV…','busy');
+      [...document.querySelectorAll('button')].forEach(x => x.disabled = true);
+      try {
+        const normalized = await normalizeAudio(file);
+        state.duration = normalized.duration;
+        resizeCanvas(); draw();
+        status($('importStatus'),`Analyse automatique de ${formatTime(state.duration)} avec StemgenRT… cela peut prendre un moment.`,'busy');
+        const response = await fetch(`/api/analyze?name=${encodeURIComponent(file.name)}`, {method:'POST',body:normalized.blob});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'analyse impossible');
+        state.audioName = data.audio; state.duration = data.duration; state.segments = data.segments || [];
+        state.editing = -1; state.selection = null;
+        $('exclusiveMode').checked=false;syncExclusiveMode();
+        setSelected('global',data.global_labels); setSelected('segment',[]);
+        $('filename').textContent = file.name; $('engine').textContent = `Pré-analyse : ${data.engine}`;
+        $('start').value = '0.00'; $('end').value = Math.min(5,state.duration).toFixed(2);
+        updateEditor(); resizeCanvas(); draw();
+        status($('saveStatus'),'Corrige les blocs puis valide : seules tes corrections seront conservées.');
+      } catch (error) {
+        status($('importStatus'),`Analyse échouée : ${error.message}`,'error');
+        status($('saveStatus'),`Analyse échouée : ${error.message}`,'error');
+      } finally {
+        [...document.querySelectorAll('button')].forEach(x => x.disabled = false);
+        updateEditor();
+        await refreshDataset();
+      }
+    }
+
+    const drop = $('drop');
+    ['dragenter','dragover'].forEach(name => drop.addEventListener(name,event => { event.preventDefault(); drop.classList.add('drag'); }));
+    ['dragleave','drop'].forEach(name => drop.addEventListener(name,event => { event.preventDefault(); drop.classList.remove('drag'); }));
+    drop.addEventListener('drop',event => loadFile(event.dataTransfer.files[0]));
+    $('fileInput').addEventListener('change',event => loadFile(event.target.files[0]));
+    async function loadYouTube() {
+      const url = $('youtubeUrl').value.trim();
+      if (!url) { status($('importStatus'),'Colle un lien YouTube, camarade.','error'); return; }
+      $('youtubeLoad').disabled = true;
+      status($('importStatus'),'Récupération de la piste audio YouTube en local…','busy');
+      try {
+        const response = await fetch('/api/youtube',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'import YouTube impossible');
+        status($('importStatus'),`Audio reçu : ${data.title}. Décodage local…`,'busy');
+        const mediaResponse = await fetch(data.media_url);
+        if (!mediaResponse.ok) throw new Error('cache audio inaccessible');
+        const blob = await mediaResponse.blob();
+        const extension = data.filename.includes('.') ? data.filename.slice(data.filename.lastIndexOf('.')) : '.m4a';
+        const file = new File([blob], `${data.title}${extension}`, {type:data.mime || blob.type || 'audio/mp4'});
+        await loadFile(file);
+      } catch(error) {
+        status($('importStatus'),`Import YouTube échoué : ${error.message}`,'error');
+      } finally {
+        $('youtubeLoad').disabled = false;
+      }
+    }
+    $('youtubeLoad').onclick = loadYouTube;
+    $('youtubeUrl').addEventListener('keydown',event=>{if(event.key==='Enter')loadYouTube();});
+    $('changeFile').onclick = () => { $('workspace').classList.add('hidden'); $('dropCard').classList.remove('hidden'); $('fileInput').value=''; status($('importStatus'),'Dépose le prochain morceau.'); };
+
+    const canvas = $('timeline'), ctx = canvas.getContext('2d');
+    function resizeCanvas() { const rect=canvas.getBoundingClientRect(); canvas.width=Math.max(600,Math.floor(rect.width*devicePixelRatio)); canvas.height=Math.floor(370*devicePixelRatio); }
+    function geometry() { return {w:canvas.width,h:canvas.height,top:38*devicePixelRatio,lane:(canvas.height-38*devicePixelRatio)/ROLES.length}; }
+    function xFor(time) { return state.duration ? time/state.duration*canvas.width : 0; }
+    function timeFor(x) { return Math.max(0,Math.min(state.duration,x/canvas.getBoundingClientRect().width*state.duration)); }
+    function draw() {
+      const {w,h,top,lane}=geometry(); ctx.clearRect(0,0,w,h); ctx.fillStyle='#0d0f0f';ctx.fillRect(0,0,w,h);
+      const mid=top*.55; ctx.beginPath();
+      state.peaks.forEach((peak,i) => { const x=i/Math.max(1,state.peaks.length-1)*w, amp=peak*top*.44; ctx.moveTo(x,mid-amp);ctx.lineTo(x,mid+amp); });
+      ctx.strokeStyle='#68706b';ctx.globalAlpha=.65;ctx.stroke();ctx.globalAlpha=1;
+      ctx.font=`${11*devicePixelRatio}px system-ui`; ctx.textBaseline='top';
+      const ticks=Math.max(4,Math.ceil(state.duration/30));
+      for(let i=0;i<=ticks;i++){ const t=i/ticks*state.duration,x=xFor(t);ctx.strokeStyle='#292d2c';ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();ctx.fillStyle='#9ca19d';ctx.fillText(formatTime(t),x+4*devicePixelRatio,4*devicePixelRatio); }
+      ROLES.forEach(([role,label],index)=>{ const y=top+index*lane;ctx.fillStyle=index%2?'#121515':'#171919';ctx.fillRect(0,y,w,lane);ctx.strokeStyle='#292d2c';ctx.strokeRect(0,y,w,lane);ctx.fillStyle='#b9bdb9';ctx.fillText(label,7*devicePixelRatio,y+6*devicePixelRatio); });
+      state.segments.forEach((segment,index)=>segment.labels.forEach(role=>{ const laneIndex=ROLES.findIndex(x=>x[0]===role);if(laneIndex<0)return;const y=top+laneIndex*lane+3*devicePixelRatio,x=xFor(segment.start),width=Math.max(2*devicePixelRatio,xFor(segment.end)-x);ctx.fillStyle=roleColor[role]+(index===state.editing?'ff':'b8');ctx.fillRect(x,y,width,lane-6*devicePixelRatio);if(width>55*devicePixelRatio){ctx.fillStyle='#101212';ctx.font=`bold ${10*devicePixelRatio}px system-ui`;ctx.fillText(`${segment.confidence?Math.round(segment.confidence*100)+'%':'corrigé'}`,x+5*devicePixelRatio,y+5*devicePixelRatio);} }));
+      if(state.selection){ const x=xFor(Math.min(...state.selection)), width=Math.abs(xFor(state.selection[1])-xFor(state.selection[0]));ctx.fillStyle='rgba(244,197,66,.17)';ctx.fillRect(x,0,width,h);ctx.strokeStyle='#f4c542';ctx.lineWidth=2*devicePixelRatio;ctx.strokeRect(x,1,width,h-2);ctx.lineWidth=1; }
+      const playhead=xFor($('player').currentTime||0);ctx.strokeStyle='#fff';ctx.lineWidth=2*devicePixelRatio;ctx.beginPath();ctx.moveTo(playhead,0);ctx.lineTo(playhead,h);ctx.stroke();ctx.lineWidth=1;
+    }
+    let dragging=false, dragStart=0, dragMoved=false;
+    canvas.addEventListener('pointerdown',event=>{ const rect=canvas.getBoundingClientRect(),time=timeFor(event.clientX-rect.left),{top,lane}=geometry(),y=(event.clientY-rect.top)*devicePixelRatio,laneIndex=Math.floor((y-top)/lane); const hit=state.segments.map((s,i)=>({s,i})).reverse().find(({s})=>time>=s.start&&time<=s.end&&laneIndex>=0&&s.labels.includes(ROLES[laneIndex][0])); if(hit){editSegment(hit.i);return;} dragging=true;dragMoved=false;dragStart=time;state.selection=[time,time];canvas.setPointerCapture(event.pointerId);draw(); });
+    canvas.addEventListener('pointermove',event=>{if(!dragging)return;const rect=canvas.getBoundingClientRect(),time=timeFor(event.clientX-rect.left);dragMoved=dragMoved||Math.abs(time-dragStart)>.08;state.selection=[dragStart,time];draw();});
+    canvas.addEventListener('pointerup',()=>{if(!dragging)return;dragging=false;const [a,b]=state.selection,start=Math.min(a,b),end=Math.max(a,b);state.editing=-1;$('player').currentTime=start;$('start').value=start.toFixed(2);if(dragMoved){$('end').value=end.toFixed(2);}else{$('end').value=Math.min(state.duration,start+1).toFixed(2);state.selection=[start,start];}updateEditor();draw();});
+
+    function editSegment(index){ const s=state.segments[index];state.editing=index;state.selection=[s.start,s.end];$('player').currentTime=s.start;$('start').value=s.start.toFixed(2);$('end').value=s.end.toFixed(2);setSelected('segment',s.labels.slice(0,1));updateEditor();draw(); }
+    function updateCaptureState(){const roles=selected('segment'),start=Number($('start').value)||0,name=roles.length?roleLabel[roles[0]]:'aucun instrument';$('captureState').textContent=`Instrument : ${name} · début : ${formatTime(start)} · Espace lecture/pause · S début · E fin + ajout · R relire`;}
+    function updateEditor(){ const editing=state.editing>=0;$('applySegment').textContent=editing?'Mettre à jour':'Ajouter';$('deleteSegment').disabled=!editing;$('cancelEdit').disabled=!editing;$('segmentCount').textContent=`${state.segments.length} passage${state.segments.length===1?'':'s'}`;updateCaptureState(); }
+    function applySegment(){ const start=Math.max(0,Number($('start').value)),end=Math.min(state.duration,Number($('end').value)),labels=selected('segment');if(!(end>start)||!labels.length){status($('saveStatus'),'Choisis un instrument et un passage valide.','error');return false;}const segment={start,end,labels,source:'human'};if(state.editing>=0)state.segments[state.editing]=segment;else state.segments.push(segment);state.segments.sort((a,b)=>a.start-b.start);labels.forEach(role=>$(`global-${role}`).checked=true);state.editing=-1;state.selection=null;updateEditor();draw();status($('saveStatus'),'Passage ajouté. N’oublie pas d’enregistrer les corrections.','ok');return true;}
+    function togglePlayback(){const player=$('player');if(player.paused)player.play();else player.pause();}
+    function markStart(){const time=$('player').currentTime;$('start').value=time.toFixed(2);$('end').value=Math.min(state.duration,time+1).toFixed(2);state.selection=[time,time];state.editing=-1;updateEditor();draw();}
+    function finishSegment(){const player=$('player');player.pause();$('end').value=player.currentTime.toFixed(2);state.selection=[Number($('start').value),player.currentTime];applySegment();}
+    function replayStart(){const player=$('player');player.currentTime=Math.max(0,Number($('start').value)||0);player.play();}
+    $('rewind3').onclick=()=>{$('player').currentTime=Math.max(0,$('player').currentTime-3)};
+    $('replayStart').onclick=replayStart;
+    $('togglePlay').onclick=togglePlayback;
+    $('markStart').onclick=markStart;
+    $('finishSegment').onclick=finishSegment;
+    $('applySegment').onclick=applySegment;
+    $('segmentChecks').addEventListener('change',updateCaptureState);
+    $('deleteSegment').onclick=()=>{if(state.editing<0)return;state.segments.splice(state.editing,1);state.editing=-1;state.selection=null;setSelected('segment',[]);updateEditor();draw();};
+    $('cancelEdit').onclick=()=>{state.editing=-1;state.selection=null;setSelected('segment',[]);updateEditor();draw();};
+    function updateTransport(){const player=$('player'),time=player.currentTime||0,mins=Math.floor(time/60),secs=(time-mins*60).toFixed(2).padStart(5,'0');$('clock').textContent=`${mins}:${secs}`;$('togglePlay').textContent=player.paused?'▶ Lecture':'Ⅱ Pause';draw();}
+    $('player').addEventListener('timeupdate',updateTransport);$('player').addEventListener('play',updateTransport);$('player').addEventListener('pause',updateTransport);$('player').addEventListener('seeked',updateTransport);window.addEventListener('resize',()=>{resizeCanvas();draw();});
+    document.addEventListener('keydown',event=>{if(['INPUT','TEXTAREA'].includes(event.target.tagName))return;if(event.code==='Space'){event.preventDefault();togglePlayback();}else if(event.key.toLowerCase()==='s')markStart();else if(event.key.toLowerCase()==='e')finishSegment();else if(event.key.toLowerCase()==='r')replayStart();else if(/^[1-6]$/.test(event.key)){const role=ROLES[Number(event.key)-1][0];$(`segment-${role}`).checked=true;updateCaptureState();}});
+    $('save').onclick=async()=>{ status($('saveStatus'),'Enregistrement local…','busy');try{const response=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({audio:state.audioName,duration:state.duration,global_labels:selected('global'),exclusive_label:$('exclusiveMode').checked?$('exclusiveRole').value:null,segments:state.segments})});const data=await response.json();if(!response.ok)throw new Error(data.error||'échec');status($('saveStatus'),`Sauvé dans ${data.path}`,'ok');await refreshDataset();}catch(error){status($('saveStatus'),`Échec : ${error.message}`,'error');} };
+    function escapeHtml(value){return String(value).replace(/[&<>'"]/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));}
+    async function refreshDataset(){
+      try{
+        const response=await fetch('/api/dataset');const data=await response.json();if(!response.ok)throw new Error(data.error||'dataset inaccessible');
+        $('datasetSummary').textContent=`${data.track_count} morceau${data.track_count===1?'':'x'} · ${data.readiness}`;
+        $('datasetRows').innerHTML=data.tracks.map(track=>{const coverage=track.labels.map(role=>{const values=track.by_role[role];return `<span class="tag">${escapeHtml(roleLabel[role]||role)} · ${values.segments} · ${values.seconds.toFixed(1)}s</span>`}).join('')||'<span class="tag">aucun passage</span>';const mode=track.exclusive_label?` <span class="tag">uniquement ${escapeHtml(roleLabel[track.exclusive_label]||track.exclusive_label)}</span>`:track.weak_labels?' <span class="tag">labels globaux</span>':'';return `<tr><td><strong>${escapeHtml(track.title)}</strong>${mode}</td><td>${formatTime(track.duration)}</td><td>${track.segments}</td><td>${coverage}</td></tr>`}).join('');
+        const training=data.training||{status:'idle',progress:0,message:''};
+        $('trainingProgress').value=training.progress||0;$('trainingStatus').textContent=training.message||'';$('trainingStatus').className=`status ${training.status==='failed'?'error':training.status==='succeeded'?'ok':training.status==='running'?'busy':''}`;
+        $('trainModel').disabled=!data.ready||training.status==='running';
+        if(training.report){const candidate=(training.report.candidate_macro_f1*100).toFixed(1),baseline=(training.report.baseline_macro_f1*100).toFixed(1);$('trainingStatus').textContent+=` Candidat ${candidate}% · modèle actuel ${baseline}% · validation : ${training.report.validation_track}.`;}
+        return training.status;
+      }catch(error){status($('trainingStatus'),`Dataset : ${error.message}`,'error');return 'failed';}
+    }
+    $('trainModel').onclick=async()=>{try{const response=await fetch('/api/train',{method:'POST'}),data=await response.json();if(!response.ok)throw new Error(data.error||'entraînement impossible');await refreshDataset();}catch(error){status($('trainingStatus'),error.message,'error');}};
+    refreshDataset();
+    setInterval(refreshDataset,2500);
+    setInterval(()=>{if(!$('player').paused)draw()},50);
+  </script>
+</body>
+</html>

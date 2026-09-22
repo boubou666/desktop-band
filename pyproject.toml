@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "desktop-band"
+name = "gopnik-band"
 version = "0.1.0"
-description = "A tiny animated band that reacts to desktop audio."
+description = "An animated gopnik band that reacts to system audio."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,20 +13,33 @@ dependencies = [
     "numpy>=1.24",
     "onnxruntime>=1.23,<2",
     "pillow>=11,<13",
+    "pynput>=1.8.2,<2",
     "pystray>=0.19.5,<0.20",
     "soundcard>=0.4.3,<0.5",
+    "yt-dlp[default]>=2025.1.15",
 ]
 
 [project.urls]
-Homepage = "https://github.com/boubou666/desktop-band"
-Repository = "https://github.com/boubou666/desktop-band"
-Changelog = "https://github.com/boubou666/desktop-band/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/boubou666/gopnik-band"
+Repository = "https://github.com/boubou666/gopnik-band"
+Changelog = "https://github.com/boubou666/gopnik-band/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+training = ["onnx>=1.19,<2"]
 
 [project.scripts]
+gopnik-band = "desktop_band.__main__:main"
+gopnik-band-annotator = "desktop_band.annotator:main"
 desktop-band = "desktop_band.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["desktop_band*"]
+include = ["desktop_band*", "gopnik_band*"]
 
 [tool.setuptools.package-data]
-desktop_band = ["assets/*.png", "assets/packs/*/*.png", "assets/packs/*/*.json"]
+desktop_band = [
+    "annotator_ui.html",
+    "assets/packs/*/*.png",
+    "assets/packs/*/*.json",
+    "assets/decors/*.png",
+    "models/*.onnx",
+]
