@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Balanced BabySlakh downloader/importer with checksum verification, isolated
+  instrument excerpts, provenance and composition-level validation groups.
+- Cached per-track StemgenRT extraction with live track progress, elapsed time
+  and ETA.
+- Per-role validation metrics, confusion counts, threshold calibration,
+  promotion reasons and feature-space augmentation.
+- Multi-composition validation splits that cover every instrument while
+  keeping all excerpts from a source composition on the same side.
+- Local synthetic mix generation from exclusive stems with gain, EQ,
+  compression, noise and speed variations.
+- A/B model comparison, archived-model rollback and annotation history.
+- Automatic uncertainty review windows in the annotator timeline.
+- Privacy-preserving live mistake bookmarks and feature-only replay sessions,
+  available from the tray and global hotkeys.
+- Named formation editor, built-in formation presets and tray selection.
+- Contextual solo pointing, drumstick tosses and vodka-round interactions.
 - Gopnik Lab can mark a complete track as one exclusive instrument, overriding
   conflicting automatic timeline predictions during training.
 - Local Gopnik Lab annotator with audio drag-and-drop, automatic StemgenRT
@@ -42,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The tray now prefers the active virtual environment over unrelated global
+  `PYTHONPATH` entries and logs backend startup failures instead of hiding them.
 - Animation speed now combines musical tempo, per-role subdivisions, stem
   activity and short percussive boosts.
 - Reported BPM and internal animation double-time are now separate, keeping

@@ -137,6 +137,15 @@
     th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
     th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
     .tag { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 7px; border-radius: 999px; background: #2b302e; font-size: 11px; }
+    .review-list, .model-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .review-list button { border-color: #8b793d; color: var(--gold); }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 8px; margin-top: 12px; }
+    .metric { padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #111414; }
+    .metric strong { display: block; color: var(--gold); }
+    .formation-grid { display: grid; grid-template-columns: 150px 1fr 1fr 1fr; gap: 6px 10px; align-items: center; margin-top: 12px; }
+    .formation-grid .head { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    .formation-grid input[type=range] { width: 100%; accent-color: var(--red); }
+    select { padding: 8px 9px; color: var(--ink); background: #111313; border: 1px solid var(--line); border-radius: 7px; font: inherit; }
     progress { width: 100%; height: 9px; margin-top: 8px; accent-color: var(--green); }
     @media (max-width: 800px) {
       header { align-items: start; flex-direction: column; }
@@ -209,6 +218,8 @@
         <div class="timeline-wrap"><canvas id="timeline"></canvas></div>
         <div id="legend" class="legend"></div>
         <div class="hint">Glisse sur la timeline pour sélectionner une zone. Clique sur un bloc pour le modifier. Clique pendant la lecture pour déplacer le curseur.</div>
+        <h2 style="margin-top:16px">Passages incertains à vérifier</h2>
+        <div id="reviewWindows" class="review-list"><span class="engine">Aucun conflit détecté.</span></div>
       </section>
 
       <section class="card">
@@ -235,14 +246,38 @@
           <div><h2>Dataset du commissaire</h2><div id="datasetSummary" class="engine">Chargement…</div></div>
           <div class="dataset-actions">
             <button id="trainModel">Entraîner un candidat</button>
+            <button id="syntheticMixes">Fabriquer 12 mixes</button>
+            <button id="compareModels">Comparer A/B</button>
             <a class="button-link" href="/api/model-export">Exporter le modèle</a>
           </div>
         </div>
         <div id="trainingStatus" class="status">Aucun entraînement lancé.</div>
         <progress id="trainingProgress" max="100" value="0"></progress>
+        <div id="trainingMetrics" class="metrics"></div>
         <div class="table-wrap">
           <table><thead><tr><th>Morceau</th><th>Durée</th><th>Passages</th><th>Couverture corrigée</th></tr></thead><tbody id="datasetRows"></tbody></table>
         </div>
+        <div class="topline" style="margin-top:16px">
+          <div><strong>Registre des modèles</strong><div class="engine">Comparer, activer ou revenir à une version archivée.</div></div>
+          <div class="dataset-actions"><select id="modelSelect"></select><button id="activateModel">Activer</button></div>
+        </div>
+        <div id="modelResults" class="status"></div>
+        <div id="liveReviews" class="status">Aucun signalement live chargé.</div>
+        <div class="topline" style="margin-top:12px">
+          <div><strong>Historique des annotations</strong><div class="engine">Une révision est créée avant chaque modification.</div></div>
+          <div class="dataset-actions"><select id="historySelect"></select><button id="restoreHistory">Restaurer</button></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="dataset-head">
+          <div><h2>Éditeur de compositions</h2><div class="engine">Ces formations apparaissent dans le tray au prochain lancement.</div></div>
+          <div class="dataset-actions"><input id="formationName" placeholder="Nom de la formation" style="padding:9px;color:var(--ink);background:#101212;border:1px solid var(--line);border-radius:7px"><button id="saveFormation">Sauver</button></div>
+        </div>
+        <div id="formationChecks" class="checks" style="margin-top:12px"></div>
+        <div id="formationPlacement" class="formation-grid"></div>
+        <div class="dataset-actions" style="margin-top:10px"><select id="formationDecor"><option value="none">Sans décor</option><option value="garage">Garage</option><option value="panelki">Blocs soviétiques</option></select><label class="check"><input id="formationLighting" type="checkbox" checked> Éclairage musical</label></div>
+        <div id="formationStatus" class="status"></div>
       </section>
   </main>
 
@@ -252,25 +287,30 @@
       ['bassist','Basse','#06d6a0'], ['keyboard','Clavier / synthé','#118ab2'],
       ['guitarist','Guitare','#9b5de5'], ['percussion','Percussions','#f9844a']
     ];
+    const FORMATION_ROLES = [...ROLES,['vibing','Danseur','#a3e635']];
     const $ = id => document.getElementById(id);
-    const state = { file:null, audioName:null, duration:0, segments:[], peaks:[], selection:null, editing:-1, objectUrl:null };
+    const state = { file:null, audioName:null, duration:0, segments:[], reviewWindows:[], peaks:[], selection:null, editing:-1, objectUrl:null };
     const roleColor = Object.fromEntries(ROLES.map(x => [x[0],x[2]]));
     const roleLabel = Object.fromEntries(ROLES.map(x => [x[0],x[1]]));
 
-    function buildChecks(target, prefix) {
-      target.innerHTML = ROLES.map(([role,label]) => `<label class="check"><input type="checkbox" data-role="${role}" id="${prefix}-${role}">${label}</label>`).join('');
+    function buildChecks(target, prefix, roles=ROLES) {
+      target.innerHTML = roles.map(([role,label]) => `<label class="check"><input type="checkbox" data-role="${role}" id="${prefix}-${role}">${label}</label>`).join('');
     }
     buildChecks($('globalChecks'),'global');
+    buildChecks($('formationChecks'),'formation',FORMATION_ROLES);
+    $('formationPlacement').innerHTML='<span class="head">Personnage</span><span class="head">Position</span><span class="head">Échelle</span><span class="head">Profondeur</span>'+FORMATION_ROLES.map(([role,label],index)=>`<strong>${label}</strong><input id="formation-x-${role}" type="range" min="4" max="96" value="${Math.round((index+1)/(FORMATION_ROLES.length+1)*100)}"><input id="formation-scale-${role}" type="range" min="80" max="120" value="100"><input id="formation-depth-${role}" type="range" min="-3" max="3" value="0">`).join('');
     $('exclusiveRole').innerHTML = ROLES.map(([role,label])=>`<option value="${role}">${label}</option>`).join('');
     $('segmentChecks').innerHTML = ROLES.map(([role,label,color],index) => `<label class="instrument" style="--role:${color}"><input type="radio" name="capture-role" data-role="${role}" id="segment-${role}"><kbd>${index+1}</kbd>${label}</label>`).join('');
     $('legend').innerHTML = ROLES.map(([role,label,color]) => `<span style="--c:${color}">${label}</span>`).join('');
 
     function selected(prefix) {
-      return ROLES.map(x => x[0]).filter(role => $(`${prefix}-${role}`).checked);
+      const roles=prefix==='formation'?FORMATION_ROLES:ROLES;
+      return roles.map(x => x[0]).filter(role => $(`${prefix}-${role}`).checked);
     }
     function setSelected(prefix, roles) {
       const wanted = new Set(roles || []);
-      ROLES.forEach(([role]) => $(`${prefix}-${role}`).checked = wanted.has(role));
+      const choices=prefix==='formation'?FORMATION_ROLES:ROLES;
+      choices.forEach(([role]) => $(`${prefix}-${role}`).checked = wanted.has(role));
     }
     function syncExclusiveMode(){const enabled=$('exclusiveMode').checked,role=$('exclusiveRole').value;$('exclusiveRole').disabled=!enabled;document.querySelectorAll('#globalChecks input').forEach(input=>input.disabled=enabled);if(enabled)setSelected('global',[role]);}
     $('exclusiveMode').addEventListener('change',syncExclusiveMode);
@@ -344,13 +384,14 @@
         const response = await fetch(`/api/analyze?name=${encodeURIComponent(file.name)}`, {method:'POST',body:normalized.blob});
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'analyse impossible');
-        state.audioName = data.audio; state.duration = data.duration; state.segments = data.segments || [];
+        state.audioName = data.audio; state.duration = data.duration; state.segments = data.segments || []; state.reviewWindows=data.review_windows||[];
         state.editing = -1; state.selection = null;
         $('exclusiveMode').checked=false;syncExclusiveMode();
         setSelected('global',data.global_labels); setSelected('segment',[]);
         $('filename').textContent = file.name; $('engine').textContent = `Pré-analyse : ${data.engine}`;
         $('start').value = '0.00'; $('end').value = Math.min(5,state.duration).toFixed(2);
         updateEditor(); resizeCanvas(); draw();
+        renderReviewWindows();
         status($('saveStatus'),'Corrige les blocs puis valide : seules tes corrections seront conservées.');
       } catch (error) {
         status($('importStatus'),`Analyse échouée : ${error.message}`,'error');
@@ -408,9 +449,11 @@
       for(let i=0;i<=ticks;i++){ const t=i/ticks*state.duration,x=xFor(t);ctx.strokeStyle='#292d2c';ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();ctx.fillStyle='#9ca19d';ctx.fillText(formatTime(t),x+4*devicePixelRatio,4*devicePixelRatio); }
       ROLES.forEach(([role,label],index)=>{ const y=top+index*lane;ctx.fillStyle=index%2?'#121515':'#171919';ctx.fillRect(0,y,w,lane);ctx.strokeStyle='#292d2c';ctx.strokeRect(0,y,w,lane);ctx.fillStyle='#b9bdb9';ctx.fillText(label,7*devicePixelRatio,y+6*devicePixelRatio); });
       state.segments.forEach((segment,index)=>segment.labels.forEach(role=>{ const laneIndex=ROLES.findIndex(x=>x[0]===role);if(laneIndex<0)return;const y=top+laneIndex*lane+3*devicePixelRatio,x=xFor(segment.start),width=Math.max(2*devicePixelRatio,xFor(segment.end)-x);ctx.fillStyle=roleColor[role]+(index===state.editing?'ff':'b8');ctx.fillRect(x,y,width,lane-6*devicePixelRatio);if(width>55*devicePixelRatio){ctx.fillStyle='#101212';ctx.font=`bold ${10*devicePixelRatio}px system-ui`;ctx.fillText(`${segment.confidence?Math.round(segment.confidence*100)+'%':'corrigé'}`,x+5*devicePixelRatio,y+5*devicePixelRatio);} }));
+      state.reviewWindows.forEach(item=>{const x=xFor(item.start),width=Math.max(2*devicePixelRatio,xFor(item.end)-x);ctx.fillStyle='rgba(244,197,66,.10)';ctx.fillRect(x,0,width,h);ctx.strokeStyle='#f4c542';ctx.setLineDash([5*devicePixelRatio,4*devicePixelRatio]);ctx.strokeRect(x,1,width,h-2);ctx.setLineDash([]);});
       if(state.selection){ const x=xFor(Math.min(...state.selection)), width=Math.abs(xFor(state.selection[1])-xFor(state.selection[0]));ctx.fillStyle='rgba(244,197,66,.17)';ctx.fillRect(x,0,width,h);ctx.strokeStyle='#f4c542';ctx.lineWidth=2*devicePixelRatio;ctx.strokeRect(x,1,width,h-2);ctx.lineWidth=1; }
       const playhead=xFor($('player').currentTime||0);ctx.strokeStyle='#fff';ctx.lineWidth=2*devicePixelRatio;ctx.beginPath();ctx.moveTo(playhead,0);ctx.lineTo(playhead,h);ctx.stroke();ctx.lineWidth=1;
     }
+    function renderReviewWindows(){const target=$('reviewWindows');if(!state.reviewWindows.length){target.innerHTML='<span class="engine">Aucun conflit important détecté.</span>';return;}target.innerHTML=state.reviewWindows.map((item,index)=>`<button data-review="${index}">${formatTime(item.start)}–${formatTime(item.end)} · ${item.labels.map(role=>roleLabel[role]).join(' / ')}</button>`).join('');target.querySelectorAll('button').forEach(button=>button.onclick=()=>{const item=state.reviewWindows[Number(button.dataset.review)];$('player').currentTime=item.start;$('start').value=item.start.toFixed(2);$('end').value=item.end.toFixed(2);state.selection=[item.start,item.end];setSelected('segment',[item.labels[0]]);updateEditor();draw();$('player').play();});}
     let dragging=false, dragStart=0, dragMoved=false;
     canvas.addEventListener('pointerdown',event=>{ const rect=canvas.getBoundingClientRect(),time=timeFor(event.clientX-rect.left),{top,lane}=geometry(),y=(event.clientY-rect.top)*devicePixelRatio,laneIndex=Math.floor((y-top)/lane); const hit=state.segments.map((s,i)=>({s,i})).reverse().find(({s})=>time>=s.start&&time<=s.end&&laneIndex>=0&&s.labels.includes(ROLES[laneIndex][0])); if(hit){editSegment(hit.i);return;} dragging=true;dragMoved=false;dragStart=time;state.selection=[time,time];canvas.setPointerCapture(event.pointerId);draw(); });
     canvas.addEventListener('pointermove',event=>{if(!dragging)return;const rect=canvas.getBoundingClientRect(),time=timeFor(event.clientX-rect.left);dragMoved=dragMoved||Math.abs(time-dragStart)>.08;state.selection=[dragStart,time];draw();});
@@ -441,16 +484,40 @@
     async function refreshDataset(){
       try{
         const response=await fetch('/api/dataset');const data=await response.json();if(!response.ok)throw new Error(data.error||'dataset inaccessible');
-        $('datasetSummary').textContent=`${data.track_count} morceau${data.track_count===1?'':'x'} · ${data.readiness}`;
-        $('datasetRows').innerHTML=data.tracks.map(track=>{const coverage=track.labels.map(role=>{const values=track.by_role[role];return `<span class="tag">${escapeHtml(roleLabel[role]||role)} · ${values.segments} · ${values.seconds.toFixed(1)}s</span>`}).join('')||'<span class="tag">aucun passage</span>';const mode=track.exclusive_label?` <span class="tag">uniquement ${escapeHtml(roleLabel[track.exclusive_label]||track.exclusive_label)}</span>`:track.weak_labels?' <span class="tag">labels globaux</span>':'';return `<tr><td><strong>${escapeHtml(track.title)}</strong>${mode}</td><td>${formatTime(track.duration)}</td><td>${track.segments}</td><td>${coverage}</td></tr>`}).join('');
+        $('datasetSummary').textContent=`${data.source_count??data.track_count} composition${(data.source_count??data.track_count)===1?'':'s'} · ${data.track_count} extrait${data.track_count===1?'':'s'} · ${data.readiness}`;
+        $('datasetRows').innerHTML=data.tracks.map(track=>{const coverage=track.labels.map(role=>{const values=track.by_role[role];return `<span class="tag">${escapeHtml(roleLabel[role]||role)} · ${values.segments} · ${values.seconds.toFixed(1)}s</span>`}).join('')||'<span class="tag">aucun passage</span>';const mode=track.exclusive_label?` <span class="tag">uniquement ${escapeHtml(roleLabel[track.exclusive_label]||track.exclusive_label)}</span>`:track.weak_labels?' <span class="tag">labels globaux</span>':'';const source=track.source_dataset?` <span class="tag">${escapeHtml(track.source_dataset)}</span>`:'';return `<tr><td><strong>${escapeHtml(track.title)}</strong>${source}${mode}</td><td>${formatTime(track.duration)}</td><td>${track.segments}</td><td>${coverage}</td></tr>`}).join('');
         const training=data.training||{status:'idle',progress:0,message:''};
-        $('trainingProgress').value=training.progress||0;$('trainingStatus').textContent=training.message||'';$('trainingStatus').className=`status ${training.status==='failed'?'error':training.status==='succeeded'?'ok':training.status==='running'?'busy':''}`;
+        $('trainingProgress').value=training.progress||0;const timing=training.status==='running'?` · ${formatTime(training.elapsed_seconds||0)} écoulées${training.eta_seconds!=null?` · ETA ${formatTime(training.eta_seconds)}`:''}${training.current_track?` · ${training.current_track}`:''}${training.cache_hits?` · ${training.cache_hits} cache(s)`:''}`:'';$('trainingStatus').textContent=(training.message||'')+timing;$('trainingStatus').className=`status ${training.status==='failed'?'error':training.status==='succeeded'?'ok':training.status==='running'?'busy':''}`;
         $('trainModel').disabled=!data.ready||training.status==='running';
-        if(training.report){const candidate=(training.report.candidate_macro_f1*100).toFixed(1),baseline=(training.report.baseline_macro_f1*100).toFixed(1);$('trainingStatus').textContent+=` Candidat ${candidate}% · modèle actuel ${baseline}% · validation : ${training.report.validation_track}.`;}
+        if(training.report){const candidate=(training.report.candidate_macro_f1*100).toFixed(1),baseline=training.report.baseline_macro_f1==null?'—':(training.report.baseline_macro_f1*100).toFixed(1);$('trainingStatus').textContent+=` Candidat ${candidate}% · modèle actuel ${baseline}% · validation : ${training.report.validation_track}.`;$('trainingMetrics').innerHTML=Object.entries(training.report.candidate_per_role_f1||{}).map(([role,score])=>`<div class="metric"><span>${escapeHtml(roleLabel[role]||role)}</span><strong>${(score*100).toFixed(1)}%</strong><small>seuil ${training.report.thresholds?.[role]??0.5}</small></div>`).join('');}else if(training.status!=='running')$('trainingMetrics').innerHTML='';
+        await refreshModelsAndHistory();
         return training.status;
       }catch(error){status($('trainingStatus'),`Dataset : ${error.message}`,'error');return 'failed';}
     }
     $('trainModel').onclick=async()=>{try{const response=await fetch('/api/train',{method:'POST'}),data=await response.json();if(!response.ok)throw new Error(data.error||'entraînement impossible');await refreshDataset();}catch(error){status($('trainingStatus'),error.message,'error');}};
+    $('syntheticMixes').onclick=async()=>{if(!confirm('Fabriquer 12 mixes locaux à partir des pistes mono-instrument ?'))return;status($('modelResults'),'Mixage synthétique en cours…','busy');try{const response=await fetch('/api/synthetic',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({count:12,seconds:12})}),data=await response.json();if(!response.ok)throw new Error(data.error||'mixage impossible');status($('modelResults'),`${data.mixes} mixes créés avec : ${data.roles.map(role=>roleLabel[role]||role).join(', ')}.`,'ok');}catch(error){status($('modelResults'),error.message,'error');}};
+    $('compareModels').onclick=async()=>{status($('modelResults'),'Comparaison des modèles…','busy');try{const response=await fetch('/api/model-compare'),data=await response.json();if(!response.ok)throw new Error(data.error||'comparaison impossible');$('modelResults').className='status ok';$('modelResults').innerHTML=data.models.map(model=>`<span class="tag">${escapeHtml(model.name)} · ${(model.macro_f1*100).toFixed(1)}%${model.active?' · ACTIF':''}</span>`).join('');}catch(error){status($('modelResults'),error.message,'error');}};
+    async function refreshModelsAndHistory(){
+      try{
+        const [modelsResponse,historyResponse,reviewsResponse]=await Promise.all([fetch('/api/models'),fetch('/api/history'),fetch('/api/live-reviews')]);
+        const models=await modelsResponse.json(),history=await historyResponse.json(),reviews=await reviewsResponse.json();
+        $('modelSelect').innerHTML=models.models.filter(model=>!model.active).map(model=>`<option value="${escapeHtml(model.name)}">${escapeHtml(model.name)}</option>`).join('')||'<option value="">aucune archive</option>';
+        $('activateModel').disabled=!models.models.some(model=>!model.active);
+        $('historySelect').innerHTML=history.revisions.map(item=>`<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join('')||'<option value="">aucune révision</option>';
+        $('restoreHistory').disabled=!history.revisions.length;
+        const pending=reviews.bookmarks.find(item=>!item.labels?.length);
+        const tags=reviews.bookmarks.map(item=>`<span class="tag">${escapeHtml(item.name)} · ${item.seconds}s${item.labels?.length?' · '+item.labels.map(role=>escapeHtml(roleLabel[role]||role)).join('+'):''}</span>`).join('');
+        $('liveReviews').innerHTML=reviews.bookmarks.length?`Signalements live : ${tags}`:'Aucun signalement live. Ctrl+Alt+B en ajoute un sans enregistrer le son.';
+        if(pending){
+          const editor=document.createElement('span');editor.className='dataset-actions';editor.style.marginTop='8px';editor.innerHTML=`<select id="liveReviewRole">${ROLES.map(([role,label])=>`<option value="${role}">${label}</option>`).join('')}</select><button id="labelLiveReview">Étiqueter ${escapeHtml(pending.name)}</button>`;$('liveReviews').append(editor);
+          $('labelLiveReview').onclick=async()=>{const response=await fetch('/api/live-reviews/label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:pending.name,labels:[$('liveReviewRole').value]})}),data=await response.json();if(!response.ok){status($('modelResults'),data.error||'étiquetage impossible','error');return;}status($('modelResults'),'Signalement ajouté au prochain entraînement.','ok');await refreshModelsAndHistory();};
+        }
+      }catch(_error){}
+    }
+    $('activateModel').onclick=async()=>{const name=$('modelSelect').value;if(!name)return;if(!confirm(`Activer ${name} et archiver le modèle actuel ?`))return;const response=await fetch('/api/model-activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}),data=await response.json();if(!response.ok){status($('modelResults'),data.error||'activation impossible','error');return;}status($('modelResults'),`${name} activé au prochain redémarrage.`,'ok');await refreshModelsAndHistory();};
+    $('restoreHistory').onclick=async()=>{const name=$('historySelect').value;if(!name||!confirm(`Restaurer la révision ${name} ?`))return;const response=await fetch('/api/history/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})}),data=await response.json();if(!response.ok){status($('modelResults'),data.error||'restauration impossible','error');return;}status($('modelResults'),'Annotations restaurées.','ok');await refreshDataset();};
+    $('saveFormation').onclick=async()=>{const roles=selected('formation'),placements=Object.fromEntries(roles.map(role=>[role,{x:Number($(`formation-x-${role}`).value)/100,scale:Number($(`formation-scale-${role}`).value)/100,depth:Number($(`formation-depth-${role}`).value)}])),payload={name:$('formationName').value,roles,placements,decor:$('formationDecor').value,lighting:$('formationLighting').checked};try{const response=await fetch('/api/formations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),data=await response.json();if(!response.ok)throw new Error(data.error||'sauvegarde impossible');status($('formationStatus'),`Formation « ${data.formation.name} » sauvée. Relance le groupe pour rafraîchir le tray.`,'ok');}catch(error){status($('formationStatus'),error.message,'error');}};
+    setSelected('formation',['vibing','guitarist','bassist','singer','drummer','percussion','keyboard']);
     refreshDataset();
     setInterval(refreshDataset,2500);
     setInterval(()=>{if(!$('player').paused)draw()},50);

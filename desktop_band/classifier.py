@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +69,17 @@ class InstrumentClassifier:
             self._session = session_factory(str(path))
         self._input_name = self._session.get_inputs()[0].name
         self._output_name = self._session.get_outputs()[0].name
+        self.thresholds = {label: 0.5 for label in CLASSIFIER_LABELS}
+        metadata_path = path.with_suffix(".json")
+        if metadata_path.is_file():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                configured = metadata.get("thresholds", {})
+                for label in CLASSIFIER_LABELS:
+                    value = float(configured.get(label, 0.5))
+                    self.thresholds[label] = max(0.05, min(0.95, value))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
 
     def predict(self, features) -> dict[str, float]:
         output = self._session.run(
@@ -76,10 +88,18 @@ class InstrumentClassifier:
         values = np.asarray(output, dtype=np.float32).reshape(-1)
         if values.size != len(CLASSIFIER_LABELS):
             raise RuntimeError("sortie du classifieur ONNX incompatible")
-        return {
-            label: max(0.0, min(1.0, float(value)))
-            for label, value in zip(CLASSIFIER_LABELS, values)
-        }
+        scores = {}
+        for label, raw in zip(CLASSIFIER_LABELS, values):
+            value = max(0.0, min(1.0, float(raw)))
+            threshold = self.thresholds[label]
+            # Normalize each learned operating point back to 0.5 so the
+            # existing router can remain model-agnostic.
+            if value < threshold:
+                value = 0.5 * value / threshold
+            else:
+                value = 0.5 + 0.5 * (value - threshold) / (1.0 - threshold)
+            scores[label] = max(0.0, min(1.0, value))
+        return scores
 
 
 def load_default_classifier() -> InstrumentClassifier | None:

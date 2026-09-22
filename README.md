@@ -90,6 +90,10 @@ Un clic droit sur l'icône Desktop Band permet de :
 - passer de 1 à 7 membres sans redémarrer ;
 - suivre la sortie Windows par défaut ou choisir une sortie précise ;
 - changer de pack de sprites et de profil de détection ;
+- charger une formation sauvegardée dans Gopnik Lab ;
+- marquer les dernières secondes comme mauvaise détection avec
+  **BLYAT — mauvaise détection** ;
+- enregistrer/rejouer une session de caractéristiques sans conserver l'audio ;
 - quitter proprement l'application.
 
 En mode déplacement, toute la fenêtre devient saisissable et le triangle en
@@ -136,6 +140,15 @@ python -m desktop_band --members 6 --monitor 1
 Le processus se ferme avec `Ctrl+C` dans le terminal. La fenêtre est
 click-through : elle ne vole ni le focus ni les clics aux autres applications.
 
+Raccourcis globaux : `Ctrl+Alt+G` masque le groupe, `Ctrl+Alt+M` active le
+déplacement, `Ctrl+Alt+→` change de composition, `Ctrl+Alt+B` mémorise une
+mauvaise détection et `Ctrl+Alt+R` démarre/arrête un replay sans audio. Une
+session enregistrée peut être reproduite avec :
+
+```powershell
+gopnik-band --replay training/replays/session-AAAAmmjj-HHMMSS.jsonl
+```
+
 ## Vérifications
 
 ```powershell
@@ -162,8 +175,23 @@ complet est décrit dans [`training/README.md`](training/README.md).
 Le tableau du dataset indique précisément les morceaux utilisés et leur
 couverture. L'entraînement automatisé réserve un morceau entier à la
 validation, compare le candidat au modèle actif et refuse toute régression.
+Les caractéristiques StemgenRT sont mises en cache : modifier une annotation
+ne réanalyse plus le morceau. Le Lab affiche aussi l'ETA, les scores par rôle,
+les seuils calibrés, l'historique, la comparaison A/B et le registre des
+modèles. Il peut fabriquer des mixes augmentés à partir des pistes marquées
+mono-instrument et proposer en priorité les passages incertains.
+L'éditeur de compositions sauvegarde les membres, leur position, leur échelle,
+leur profondeur, le décor et l'éclairage ; ces formations apparaissent ensuite
+dans le tray et se chargent aussi avec `--formation "Nom"`.
 Le modèle validé s'exporte ensuite en archive ONNX autonome sans inclure les
 fichiers audio.
+
+Pour amorcer automatiquement les instruments sans importer les 145 heures de
+Slakh2100, l'outil `tools/import_slakh.py --download-baby` utilise les 20
+morceaux officiels de BabySlakh et produit un sous-ensemble local équilibré.
+Le chant reste couvert par les annotations humaines. Les détails et les
+garanties contre la fuite train/validation sont décrits dans
+[`training/README.md`](training/README.md#amorcer-le-dataset-avec-babyslakh).
 
 ## Limites connues
 

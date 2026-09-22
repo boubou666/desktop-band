@@ -1,5 +1,17 @@
 # Third-party notices
 
+## Slakh2100 / BabySlakh
+
+The optional local training importer can download BabySlakh from
+[Zenodo](https://doi.org/10.5281/zenodo.4603870). The dataset is distributed
+under the Creative Commons Attribution 4.0 International license. Training
+audio and derived excerpts are never committed or included in Gopnik Band
+packages.
+
+Please cite: Ethan Manilow, Gordon Wichern, Prem Seetharaman and Jonathan Le
+Roux, “Cutting Music Source Separation Some Slakh: A Dataset to Study the
+Impact of Training Data Quality and Quantity,” WASPAA, 2019.
+
 ## StemgenRT
 
 The optional real-time source-separation model is from

@@ -16,7 +16,9 @@ import json
 import mimetypes
 from pathlib import Path
 import re
+import shutil
 import threading
+import time
 import urllib.parse
 import wave
 import webbrowser
@@ -25,8 +27,16 @@ import numpy as np
 
 from .analysis import AudioAnalyzer
 from .detection import RoleRouter
+from .diagnostics import label_review_bookmark, list_review_bookmarks
+from .formations import FormationStore
 from .learning import TrainingManager, dataset_summary, export_model_bundle
 from .stemgen import STEMGEN_SAMPLE_RATE, StemgenAnalyzer
+from .training_tools import (
+    activate_model,
+    compare_models,
+    generate_synthetic_mixes,
+    list_models,
+)
 
 
 ANNOTATION_ROLES = (
@@ -194,6 +204,44 @@ def segments_from_frames(frames: list[AnalysisFrame]) -> list[dict]:
     return sorted(segments, key=lambda item: (item["start"], item["labels"][0]))
 
 
+def review_windows_from_frames(frames: list[AnalysisFrame]) -> list[dict]:
+    """Return ambiguous windows worth a human's limited attention."""
+
+    flagged = []
+    pairs = (("drummer", "percussion"), ("guitarist", "keyboard"))
+    for frame in frames:
+        for left, right in pairs:
+            first = float(frame.scores.get(left, 0.0))
+            second = float(frame.scores.get(right, 0.0))
+            strongest = max(first, second)
+            if strongest >= 0.18 and abs(first - second) <= 0.12:
+                flagged.append({
+                    "start": frame.start,
+                    "end": frame.end,
+                    "labels": [left, right],
+                    "confidence": round(strongest, 3),
+                    "reason": "rôles proches presque à égalité",
+                })
+                break
+    merged = []
+    for item in flagged:
+        if (
+            merged
+            and merged[-1]["labels"] == item["labels"]
+            and item["start"] - merged[-1]["end"] <= 0.35
+        ):
+            merged[-1]["end"] = item["end"]
+            merged[-1]["confidence"] = max(
+                merged[-1]["confidence"], item["confidence"]
+            )
+        else:
+            merged.append(dict(item))
+    return [
+        {**item, "start": round(item["start"], 3), "end": round(item["end"], 3)}
+        for item in merged if item["end"] - item["start"] >= 0.18
+    ]
+
+
 def analyze_wav(
     path: Path, model_path: str | Path | None = None
 ) -> dict[str, object]:
@@ -247,6 +295,7 @@ def analyze_wav(
         "engine": engine,
         "global_labels": global_labels,
         "segments": segments,
+        "review_windows": review_windows_from_frames(frames),
     }
 
 
@@ -259,8 +308,10 @@ class AnnotationStore:
         self.audio_dir = self.training_dir / "audio"
         self.youtube_dir = self.training_dir / "youtube"
         self.manifest_path = self.training_dir / "annotations.json"
+        self.history_dir = self.training_dir / "history"
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self.youtube_dir.mkdir(parents=True, exist_ok=True)
+        self.history_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
     def save_audio(self, original_name: str, payload: bytes) -> Path:
@@ -309,6 +360,15 @@ class AnnotationStore:
             manifest = {"clips": []}
             if self.manifest_path.is_file():
                 manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                history = self.history_dir / f"{stamp}-{Path(audio_name).stem}.json"
+                suffix = 1
+                while history.exists():
+                    history = self.history_dir / (
+                        f"{stamp}-{Path(audio_name).stem}-{suffix}.json"
+                    )
+                    suffix += 1
+                shutil.copy2(self.manifest_path, history)
             clips = [
                 item for item in manifest.get("clips", [])
                 if item.get("audio") != clip["audio"]
@@ -317,6 +377,36 @@ class AnnotationStore:
             manifest = {"clips": sorted(clips, key=lambda item: item["audio"])}
             self.manifest_path.write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        return self.manifest_path
+
+    def list_history(self) -> list[dict[str, object]]:
+        return [
+            {
+                "name": path.name,
+                "modified": int(path.stat().st_mtime),
+                "size": path.stat().st_size,
+            }
+            for path in sorted(self.history_dir.glob("*.json"), reverse=True)[:50]
+        ]
+
+    def restore_history(self, name: str) -> Path:
+        candidate = self.history_dir / Path(name).name
+        if not candidate.is_file():
+            raise ValueError("révision inconnue")
+        document = json.loads(candidate.read_text(encoding="utf-8"))
+        if not isinstance(document.get("clips"), list):
+            raise ValueError("révision invalide")
+        with self._lock:
+            if self.manifest_path.is_file():
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                shutil.copy2(
+                    self.manifest_path,
+                    self.history_dir / f"{stamp}-avant-restauration.json",
+                )
+            self.manifest_path.write_text(
+                json.dumps(document, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
         return self.manifest_path
@@ -344,6 +434,7 @@ def make_handler(
     trainer: TrainingManager | None = None,
 ):
     trainer = trainer or TrainingManager(store.workspace)
+    formations = FormationStore(store.training_dir / "formations.json")
 
     class AnnotationHandler(BaseHTTPRequestHandler):
         server_version = "GopnikBandAnnotator/1.0"
@@ -379,6 +470,23 @@ def make_handler(
                 summary = dataset_summary(store.training_dir)
                 summary["training"] = trainer.snapshot()
                 self._json(HTTPStatus.OK, summary)
+                return
+            if path == "/api/models":
+                self._json(HTTPStatus.OK, {"models": list_models(store.workspace)})
+                return
+            if path == "/api/model-compare":
+                self._json(HTTPStatus.OK, compare_models(store.workspace))
+                return
+            if path == "/api/history":
+                self._json(HTTPStatus.OK, {"revisions": store.list_history()})
+                return
+            if path == "/api/formations":
+                self._json(HTTPStatus.OK, {"formations": formations.list()})
+                return
+            if path == "/api/live-reviews":
+                self._json(HTTPStatus.OK, {
+                    "bookmarks": list_review_bookmarks(store.training_dir)
+                })
                 return
             if path == "/api/model-export":
                 filename, payload = export_model_bundle(store.workspace)
@@ -452,6 +560,49 @@ def make_handler(
                     return
                 if parsed.path == "/api/train":
                     self._json(HTTPStatus.ACCEPTED, trainer.start())
+                    return
+                if parsed.path == "/api/synthetic":
+                    length = int(self.headers.get("Content-Length", "0"))
+                    document = (
+                        json.loads(self.rfile.read(length).decode("utf-8"))
+                        if length else {}
+                    )
+                    self._json(HTTPStatus.OK, generate_synthetic_mixes(
+                        store.training_dir,
+                        count=int(document.get("count", 12)),
+                        seconds=float(document.get("seconds", 12.0)),
+                    ))
+                    return
+                if parsed.path == "/api/model-activate":
+                    length = int(self.headers.get("Content-Length", "0"))
+                    document = json.loads(self.rfile.read(length).decode("utf-8"))
+                    self._json(HTTPStatus.OK, activate_model(
+                        store.workspace, str(document.get("name", ""))
+                    ))
+                    return
+                if parsed.path == "/api/history/restore":
+                    length = int(self.headers.get("Content-Length", "0"))
+                    document = json.loads(self.rfile.read(length).decode("utf-8"))
+                    output = store.restore_history(str(document.get("name", "")))
+                    self._json(HTTPStatus.OK, {"ok": True, "path": str(output)})
+                    return
+                if parsed.path == "/api/formations":
+                    length = int(self.headers.get("Content-Length", "0"))
+                    document = json.loads(self.rfile.read(length).decode("utf-8"))
+                    saved = formations.save(
+                        str(document.get("name", "")), document
+                    )
+                    self._json(HTTPStatus.OK, {"ok": True, "formation": saved})
+                    return
+                if parsed.path == "/api/live-reviews/label":
+                    length = int(self.headers.get("Content-Length", "0"))
+                    document = json.loads(self.rfile.read(length).decode("utf-8"))
+                    result = label_review_bookmark(
+                        store.training_dir,
+                        str(document.get("name", "")),
+                        list(document.get("labels", [])),
+                    )
+                    self._json(HTTPStatus.OK, result)
                     return
                 self.send_error(HTTPStatus.NOT_FOUND)
             except Exception as error:

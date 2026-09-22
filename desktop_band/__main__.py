@@ -107,6 +107,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="graine reproductible pour les variantes visuelles",
     )
+    parser.add_argument(
+        "--replay",
+        dest="replay_path",
+        help="rejoue une session JSONL de caractéristiques sans audio",
+    )
+    parser.add_argument(
+        "--formation",
+        help="nom d'une formation prédéfinie ou créée dans Gopnik Lab",
+    )
     return parser
 
 
@@ -131,6 +140,8 @@ def main() -> int:
             decor=args.decor,
             lighting=not args.no_lighting,
             variant_seed=args.variant_seed,
+            replay_path=args.replay_path,
+            formation=args.formation,
         )
     )
 

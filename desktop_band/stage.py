@@ -20,6 +20,8 @@ class StageDirector:
         ("vodka_toast", "ZA ZDOROVYE!"),
         ("bat_tap", "SERIOUS BUSINESS."),
         ("red_alert", "KRASNAYA TREVOGA!"),
+        ("stick_toss", "NYET, GRAVITY."),
+        ("vodka_round", "HYDRATION PROTOCOL."),
     )
     _INTERACTIONS = (
         ("fist_bump", "RESPECT."),
@@ -68,7 +70,18 @@ class StageDirector:
             lead = decision.dominant_role if decision.dominant_role in playing else playing[0]
             others = [role for role in playing if role != lead]
             partner = self._random.choice(others)
-            kind, text = self._random.choice(self._INTERACTIONS)
-            self._event = StageEvent(kind, (lead, partner), text, now + 1.5)
+            if lead != "singer" and "singer" in playing:
+                kind, text = "point_solo", "DAVAI, SOLO."
+                roles = ("singer", lead)
+            elif "drummer" in playing and getattr(features, "onset", 0.0) >= 0.62:
+                kind, text = "stick_toss", "STICK GOES UP."
+                roles = ("drummer",)
+            elif "vibing" in decision.states and len(playing) >= 3:
+                kind, text = "vodka_round", "ONE FOR COMRADES."
+                roles = tuple(playing)
+            else:
+                kind, text = self._random.choice(self._INTERACTIONS)
+                roles = (lead, partner)
+            self._event = StageEvent(kind, roles, text, now + 1.8)
             self._next_interaction = now + self._random.uniform(12.0, 24.0)
         return self._event

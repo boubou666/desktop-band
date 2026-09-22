@@ -1,6 +1,6 @@
 # Architecture
 
-Desktop Band sépare la capture, l'analyse et l'affichage pour que chaque bloc
+Gopnik Band sépare la capture, l'analyse et l'affichage pour que chaque bloc
 puisse être testé sans ouvrir de fenêtre Windows.
 
 ```text
@@ -45,3 +45,16 @@ Chaque style visuel est un pack autonome sous
 décrits dans [SPRITE_PACKS.md](SPRITE_PACKS.md).
 
 Le modèle `models/stemgen_rt.onnx` est une dépendance locale ignorée par Git.
+
+## Boucle d'apprentissage locale
+
+- `annotator.py` et `annotator_ui.html` exposent Gopnik Lab sur localhost ;
+- `learning.py` orchestre extraction, entraînement, validation et promotion ;
+- `training_tools.py` gère les mixes synthétiques, le registre et le rollback ;
+- `diagnostics.py` conserve uniquement des caractéristiques pour les
+  signalements live et les replays ;
+- `formations.py` partage les compositions entre le Lab, la CLI et le tray ;
+- `tools/collect_features.py` met en cache les sorties StemgenRT indépendamment
+  des annotations ;
+- `tools/train_classifier.py` entraîne, calibre les seuils et produit les
+  métriques par rôle.

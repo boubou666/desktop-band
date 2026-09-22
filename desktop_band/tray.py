@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
+from pathlib import Path
+import sys
+import sysconfig
 import threading
 from typing import Callable
 
@@ -19,6 +23,9 @@ class TrayCallbacks:
     set_decor: Callable[[str], None]
     toggle_lighting: Callable[[], None]
     toggle_eco: Callable[[], None]
+    mark_issue: Callable[[], None]
+    toggle_recording: Callable[[], None]
+    set_formation: Callable[[str], None]
     quit: Callable[[], None]
     get_members: Callable[[], int]
     get_output: Callable[[], str | None]
@@ -28,14 +35,19 @@ class TrayCallbacks:
     get_decor: Callable[[], str]
     get_lighting: Callable[[], bool]
     get_eco: Callable[[], bool]
+    get_recording: Callable[[], bool]
     list_outputs: Callable[[], tuple[tuple[str, str], ...]]
 
 
 class TrayController:
-    def __init__(self, callbacks: TrayCallbacks, packs: tuple[str, ...], profiles) -> None:
+    def __init__(
+        self, callbacks: TrayCallbacks, packs: tuple[str, ...], profiles,
+        formations: tuple[str, ...] = (),
+    ) -> None:
         self.callbacks = callbacks
         self.packs = packs
         self.profiles = tuple(profiles)
+        self.formations = formations
         self._icon = None
         self._thread: threading.Thread | None = None
         self.error: str | None = None
@@ -54,6 +66,14 @@ class TrayController:
 
     def _run(self) -> None:
         try:
+            # A user-level PYTHONPATH may point at another installed desktop
+            # app (Doot/Butbutbut for example).  Prefer this interpreter's own
+            # site-packages so pystray and six come from Gopnik Band's venv.
+            site_packages = str(Path(sysconfig.get_paths()["purelib"]).resolve())
+            normalized = [str(Path(entry).resolve()) for entry in sys.path if entry]
+            if site_packages in normalized:
+                index = normalized.index(site_packages)
+                sys.path.insert(0, sys.path.pop(index))
             import pystray
             from PIL import Image, ImageDraw
 
@@ -153,11 +173,19 @@ class TrayController:
                     ("panelki", "Blocs soviétiques"),
                 )
             ))
+            formations = pystray.Menu(*(
+                pystray.MenuItem(
+                    name,
+                    choose(self.callbacks.set_formation, name),
+                )
+                for name in self.formations
+            ))
             menu = pystray.Menu(
                 pystray.MenuItem("Afficher / masquer", lambda _i, _m: self.callbacks.toggle_visible()),
                 pystray.MenuItem("Déplacer / redimensionner (30 s)", lambda _i, _m: self.callbacks.enable_edit()),
                 pystray.MenuItem("Membres du groupe", roles),
                 pystray.MenuItem("Compositions rapides", members),
+                pystray.MenuItem("Formations sauvegardées", formations),
                 pystray.MenuItem("Sortie audio", pystray.Menu(*outputs)),
                 pystray.MenuItem("Pack de sprites", packs),
                 pystray.MenuItem("Profil de détection", profiles),
@@ -172,6 +200,15 @@ class TrayController:
                     lambda _i, _m: self.callbacks.toggle_eco(),
                     checked=lambda _item: self.callbacks.get_eco(),
                 ),
+                pystray.MenuItem(
+                    "BLYAT — mauvaise détection",
+                    lambda _i, _m: self.callbacks.mark_issue(),
+                ),
+                pystray.MenuItem(
+                    "Enregistrer un replay sans audio",
+                    lambda _i, _m: self.callbacks.toggle_recording(),
+                    checked=lambda _item: self.callbacks.get_recording(),
+                ),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Quitter", lambda _i, _m: self.callbacks.quit()),
             )
@@ -179,3 +216,4 @@ class TrayController:
             self._icon.run()
         except Exception as exc:
             self.error = str(exc)
+            logging.getLogger(__name__).exception("system tray failed to start")

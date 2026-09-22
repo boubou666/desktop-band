@@ -103,6 +103,27 @@ class AnnotatorTests(unittest.TestCase):
         self.assertEqual(clip["exclusive_label"], "bassist")
         self.assertEqual(clip["global_labels"], ["bassist"])
 
+    def test_store_keeps_restorable_annotation_history(self):
+        store = AnnotationStore(self.make_workspace())
+        audio = store.audio_dir / "history.wav"
+        with wave.open(str(audio), "wb") as destination:
+            destination.setnchannels(2)
+            destination.setsampwidth(2)
+            destination.setframerate(44_100)
+            destination.writeframes(np.zeros((100, 2), dtype="<i2").tobytes())
+        document = {
+            "audio": "history.wav", "duration": 5.0,
+            "global_labels": ["singer"],
+            "segments": [{"start": 0.0, "end": 1.0, "labels": ["singer"]}],
+        }
+        store.save_annotation(document)
+        document["segments"][0]["end"] = 2.0
+        store.save_annotation(document)
+        revision = store.list_history()[0]
+        store.restore_history(revision["name"])
+        manifest = json.loads(store.manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["clips"][0]["segments"][0]["end"], 1.0)
+
     def test_browser_pcm_wav_can_be_read(self):
         path = self.make_workspace() / "audio.wav"
         expected = np.asarray([[0, 1000], [-1000, 0]], dtype="<i2")

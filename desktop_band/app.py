@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import queue
+from pathlib import Path
 import sys
 
 from .band import create_custom_lineup, create_lineup
-from .capture import DemoAudioSource, SystemAudioSource
+from .capture import DemoAudioSource, ReplayAudioSource, SystemAudioSource
+from .diagnostics import FeatureRecorder
 from .detection import PROFILES
+from .formations import FormationStore
 from .renderer import BandRenderer
 from .platform_support import set_click_through
 from .sprites import available_sprite_packs
@@ -33,6 +36,8 @@ class AppOptions:
     decor: str = "none"
     lighting: bool = True
     variant_seed: int | None = None
+    replay_path: str | None = None
+    formation: str | None = None
 
 
 def _window_size(member_count: int, layout: str) -> tuple[int, int]:
@@ -54,7 +59,17 @@ def run(options: AppOptions) -> int:
         return 2
 
     tk, _tkfont = window.import_tk()
-    lineup = create_lineup(options.members)
+    formation_store = FormationStore(Path.cwd() / "training" / "formations.json")
+    formations = formation_store.list()
+    initial_formation = formations.get(options.formation or "")
+    lineup = (
+        create_custom_lineup(initial_formation["roles"])
+        if initial_formation else create_lineup(options.members)
+    )
+    initial_decor = str(initial_formation.get("decor", options.decor)) \
+        if initial_formation else options.decor
+    initial_lighting = bool(initial_formation.get("lighting", options.lighting)) \
+        if initial_formation else options.lighting
     width, height = _window_size(len(lineup), options.layout)
 
     root = tk.Tk()
@@ -90,7 +105,9 @@ def run(options: AppOptions) -> int:
     ensure_overlay_visible()
 
     source = (
-        DemoAudioSource()
+        ReplayAudioSource(options.replay_path)
+        if options.replay_path
+        else DemoAudioSource()
         if options.demo
         else SystemAudioSource(analysis=options.analysis, model_path=options.model_path)
     )
@@ -103,10 +120,12 @@ def run(options: AppOptions) -> int:
         debug=options.debug,
         sprite_pack=options.sprite_pack,
         detection_profile=options.detection_profile,
-        decor=options.decor,
-        lighting=options.lighting,
+        decor=initial_decor,
+        lighting=initial_lighting,
         variant_seed=options.variant_seed,
     )
+    if initial_formation:
+        renderer.set_stage_layout(initial_formation.get("placements", {}))
     source.start()
 
     closing = False
@@ -116,13 +135,14 @@ def run(options: AppOptions) -> int:
     member_count = options.members
     selected_pack = options.sprite_pack
     selected_profile = options.detection_profile
-    selected_decor = options.decor
-    lighting_enabled = options.lighting
+    selected_decor = initial_decor
+    lighting_enabled = initial_lighting
     eco_mode = options.eco
     active_roles = tuple(musician.role for musician in lineup)
     drag_state = {"mode": None, "x": 0, "y": 0, "wx": 0, "wy": 0, "w": width, "h": height}
     tray = None
     hotkeys = None
+    recorder = FeatureRecorder(Path.cwd() / "training")
     ui_actions: queue.SimpleQueue[tuple[object, tuple]] = queue.SimpleQueue()
 
     def schedule(callback, *args) -> None:
@@ -194,6 +214,8 @@ def run(options: AppOptions) -> int:
             tray.stop()
         if hotkeys is not None:
             hotkeys.stop()
+        if recorder.recording:
+            recorder.toggle_session()
         source.stop()
         try:
             root.destroy()
@@ -218,6 +240,7 @@ def run(options: AppOptions) -> int:
                 tray.error if tray is not None else None
             ),
         )
+        recorder.capture(source.features, renderer.last_decision)
         if editing:
             canvas.delete("edit-ui")
             canvas.create_rectangle(
@@ -306,6 +329,29 @@ def run(options: AppOptions) -> int:
         nonlocal eco_mode
         eco_mode = not eco_mode
 
+    def mark_bad_detection() -> None:
+        try:
+            recorder.mark_issue()
+            renderer.notify("BLYAT, NOTÉ.")
+        except ValueError:
+            renderer.notify("RIEN À NOTER.")
+
+    def toggle_recording() -> None:
+        path = recorder.toggle_session()
+        renderer.notify("REPLAY SAUVÉ." if path else "ENREGISTREMENT.")
+
+    def set_formation(name: str) -> None:
+        nonlocal lighting_enabled
+        formation = formations.get(name)
+        if not formation:
+            return
+        apply_lineup(create_custom_lineup(formation["roles"]))
+        renderer.set_stage_layout(formation.get("placements", {}))
+        set_decor(str(formation.get("decor", "none")))
+        lighting_enabled = bool(formation.get("lighting", True))
+        renderer.lighting = lighting_enabled
+        renderer.notify(name.upper()[:22] + ".")
+
     if options.tray:
         try:
             from .tray import TrayCallbacks, TrayController
@@ -325,6 +371,9 @@ def run(options: AppOptions) -> int:
                 set_decor=lambda value: schedule(set_decor, value),
                 toggle_lighting=lambda: schedule(toggle_lighting),
                 toggle_eco=lambda: schedule(toggle_eco),
+                mark_issue=lambda: schedule(mark_bad_detection),
+                toggle_recording=lambda: schedule(toggle_recording),
+                set_formation=lambda value: schedule(set_formation, value),
                 quit=lambda: schedule(shutdown),
                 get_members=lambda: member_count,
                 get_output=output_get,
@@ -334,9 +383,10 @@ def run(options: AppOptions) -> int:
                 get_decor=lambda: selected_decor,
                 get_lighting=lambda: lighting_enabled,
                 get_eco=lambda: eco_mode,
+                get_recording=lambda: recorder.recording,
                 list_outputs=output_list,
             )
-            tray = TrayController(callbacks, packs, PROFILES)
+            tray = TrayController(callbacks, packs, PROFILES, tuple(formations))
             tray.start()
         except Exception as exc:
             renderer.sprite_error = "tray indisponible : {}".format(exc)
@@ -349,6 +399,8 @@ def run(options: AppOptions) -> int:
                 lambda: schedule(toggle_visible),
                 lambda: schedule(enable_edit_mode),
                 lambda: schedule(next_lineup),
+                lambda: schedule(mark_bad_detection),
+                lambda: schedule(toggle_recording),
             )
             hotkeys.start()
         except Exception:

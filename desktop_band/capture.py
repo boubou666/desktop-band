@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import json
+from pathlib import Path
 import sys
 import threading
 import time
@@ -235,3 +237,41 @@ class DemoAudioSource(FeatureSource):
                 harmonic_high=0.28,
                 bpm=120.0,
             )
+
+
+class ReplayAudioSource(FeatureSource):
+    """Replay a feature-only diagnostic session without the original audio."""
+
+    def __init__(self, path: str | Path, loop: bool = True) -> None:
+        super().__init__()
+        self.path = Path(path)
+        self.loop = loop
+
+    def _run(self) -> None:
+        try:
+            frames = [
+                json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            if not frames:
+                raise ValueError("session vide")
+            allowed = set(AudioFeatures.__dataclass_fields__)
+            self.status = "replay : " + self.path.name
+            while not self._stop.is_set():
+                started = time.monotonic()
+                for frame in frames:
+                    target = float(frame.get("time", 0.0))
+                    wait = target - (time.monotonic() - started)
+                    if wait > 0 and self._stop.wait(wait):
+                        return
+                    values = {
+                        key: value for key, value in frame.get("features", {}).items()
+                        if key in allowed
+                    }
+                    self.features = AudioFeatures(**values)
+                if not self.loop:
+                    break
+            self.status = "replay terminé"
+        except Exception as exc:
+            self.error = str(exc)
+            self.status = "replay impossible"

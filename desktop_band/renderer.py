@@ -160,9 +160,19 @@ class BandRenderer:
         self._last_decision = None
         self._shout_event = None
         self._shout_until = 0.0
+        self._stage_layout: dict[str, dict[str, float]] = {}
+        self._scaled_sprite_frames = {}
         self.sprite_error = None
         self._sprite_frames = self._load_sprite_frames()
         self._decor_image = self._load_decor_image(decor)
+
+    @property
+    def last_decision(self):
+        return self._last_decision
+
+    def notify(self, text: str, role: str = "vibing", duration: float = 2.0) -> None:
+        self._shout_event = ShoutEvent(text, role, duration)
+        self._shout_until = time.monotonic() + duration
 
     def set_lineup(self, lineup: tuple[Musician, ...]) -> None:
         self.lineup = lineup
@@ -170,6 +180,17 @@ class BandRenderer:
         self._activity = [0.0 for _ in lineup]
         self._playing = [False for _ in lineup]
         self._animation_phase = [0.0 for _ in lineup]
+
+    def set_stage_layout(self, placements) -> None:
+        self._stage_layout = {
+            str(role): {
+                "x": max(0.04, min(0.96, float(value.get("x", 0.5)))),
+                "scale": max(0.8, min(1.2, float(value.get("scale", 1.0)))),
+                "depth": max(-3, min(3, int(value.get("depth", 0)))),
+            }
+            for role, value in dict(placements or {}).items()
+            if isinstance(value, dict)
+        }
 
     def resize(self, width: int, height: int) -> None:
         self.width = max(220, int(width))
@@ -195,6 +216,7 @@ class BandRenderer:
 
     def _load_sprite_frames(self):
         frames = {}
+        scaled_frames = {}
         self.sprite_error = None
         try:
             from PIL import Image, ImageTk
@@ -260,7 +282,7 @@ class BandRenderer:
                 # therefore never change the character's apparent scale.
                 common_width = max(frame.width for frame in content_frames)
                 common_height = max(frame.height for frame in content_frames)
-                role_frames = []
+                normalized_sources = []
                 for crop in content_frames:
                     normalized = Image.new(
                         "RGBA", (common_width, common_height), (0, 0, 0, 0)
@@ -269,32 +291,41 @@ class BandRenderer:
                         crop,
                         ((common_width - crop.width) // 2, common_height - crop.height),
                     )
-                    normalized.thumbnail(
-                        (self._sprite_size, self._sprite_size),
-                        Image.Resampling.LANCZOS,
-                    )
-                    frame = Image.new(
-                        "RGBA",
-                        (self._frame_size, self._frame_size),
-                        (0, 0, 0, 0),
-                    )
-                    frame.alpha_composite(
-                        normalized,
-                        (
-                            (self._frame_size - normalized.width) // 2,
-                            self._frame_size - normalized.height,
-                        ),
-                    )
-                    # Windows/Tk implements transparency with a chroma key.
-                    # Hard alpha avoids a visible magenta fringe.
-                    alpha = frame.getchannel("A").point(
-                        lambda value: 255 if value >= 80 else 0
-                    )
-                    frame.putalpha(alpha)
-                    role_frames.append(ImageTk.PhotoImage(frame, master=self.canvas))
-                frames[role] = tuple(role_frames)
+                    normalized_sources.append(normalized)
+                for scale in (0.8, 1.0, 1.2):
+                    role_frames = []
+                    target_size = round(self._sprite_size * scale)
+                    frame_size = max(self._frame_size, target_size + 8)
+                    for source in normalized_sources:
+                        normalized = source.copy()
+                        normalized.thumbnail(
+                            (target_size, target_size), Image.Resampling.LANCZOS
+                        )
+                        frame = Image.new(
+                            "RGBA", (frame_size, frame_size), (0, 0, 0, 0)
+                        )
+                        frame.alpha_composite(
+                            normalized,
+                            (
+                                (frame_size - normalized.width) // 2,
+                                frame_size - normalized.height,
+                            ),
+                        )
+                        # Windows/Tk implements transparency with a chroma key.
+                        # Hard alpha avoids a visible magenta fringe.
+                        alpha = frame.getchannel("A").point(
+                            lambda value: 255 if value >= 80 else 0
+                        )
+                        frame.putalpha(alpha)
+                        role_frames.append(
+                            ImageTk.PhotoImage(frame, master=self.canvas)
+                        )
+                    scaled_frames[(role, scale)] = tuple(role_frames)
+                frames[role] = scaled_frames[(role, 1.0)]
+            self._scaled_sprite_frames = scaled_frames
             return frames
         except Exception as exc:
+            self._scaled_sprite_frames = {}
             self.sprite_error = "sprites indisponibles : {}".format(exc)
             return {}
 
@@ -389,10 +420,13 @@ class BandRenderer:
             self._shout_event = ShoutEvent(moment.text, "vibing", moment.duration)
             self._shout_until = now + moment.duration
 
-        role_positions = {
-            musician.role: margin + spacing * (index + 0.5)
-            for index, musician in enumerate(self.lineup)
-        }
+        role_positions = {}
+        for index, musician in enumerate(self.lineup):
+            placement = self._stage_layout.get(musician.role, {})
+            role_positions[musician.role] = (
+                float(placement["x"]) * self.width
+                if "x" in placement else margin + spacing * (index + 0.5)
+            )
         stage_event = self._stage_director.update(features, decision, now)
         self._draw_decor()
         if self.lighting and features.active:
@@ -436,17 +470,24 @@ class BandRenderer:
                 self._animation_phase[index] = 0.0
 
         dominant = decision.dominant_role
-        draw_order = list(range(len(self.lineup)))
+        draw_order = sorted(
+            range(len(self.lineup)),
+            key=lambda i: self._stage_layout.get(
+                self.lineup[i].role, {}
+            ).get("depth", 0),
+        )
         if dominant is not None:
             draw_order.sort(key=lambda i: self.lineup[i].role == dominant)
         for index in draw_order:
             musician = self.lineup[index]
             x = role_positions[musician.role]
+            placement = self._stage_layout.get(musician.role, {})
+            member_ground = ground + float(placement.get("depth", 0)) * 5.0
             stage_x, stage_y = self._stage_offset(
                 musician.role, index, stage_event, elapsed
             )
             self._draw_musician(
-                musician, x + stage_x, ground + stage_y, elapsed, features, index,
+                musician, x + stage_x, member_ground + stage_y, elapsed, features, index,
                 self._activity[index],
                 state=decision.states[musician.role],
                 solo=musician.role == dominant,
@@ -554,15 +595,19 @@ class BandRenderer:
             return 0.0, wave * 7.0
         if role not in event.roles:
             return 0.0, 0.0
-        if event.kind in {"fist_bump", "nod", "challenge"}:
+        if event.kind in {"fist_bump", "nod", "challenge", "point_solo"}:
             direction = 1.0 if role == event.roles[0] else -1.0
             return direction * 5.0, -2.0 * abs(math.sin(elapsed * 5.0))
         if event.kind == "vodka_toast":
             return 0.0, -5.0 * abs(math.sin(elapsed * 4.0))
+        if event.kind == "stick_toss" and role == "drummer":
+            return 0.0, -4.0 * abs(math.sin(elapsed * 8.0))
+        if event.kind == "vodka_round":
+            return 2.5 * math.sin(elapsed * 5.0 + index), 0.0
         return 0.0, 0.0
 
     def _draw_stage_event(self, event, role_positions: dict[str, float], elapsed: float) -> None:
-        if event.kind in {"fist_bump", "nod", "challenge"} and len(event.roles) >= 2:
+        if event.kind in {"fist_bump", "nod", "challenge", "point_solo"} and len(event.roles) >= 2:
             left = role_positions.get(event.roles[0], self.width / 2)
             right = role_positions.get(event.roles[1], self.width / 2)
             midpoint = (left + right) / 2
@@ -584,6 +629,18 @@ class BandRenderer:
             inset = 5 + 3 * abs(math.sin(elapsed * 10.0))
             self._rectangle(inset, inset, self.width - inset, self.height - inset,
                             fill="", outline="#ef4444", width=4)
+        elif event.kind == "stick_toss":
+            x = role_positions.get("drummer", self.width / 2)
+            lift = 38 + 24 * abs(math.sin(elapsed * 5.5))
+            self._line(x - 8, self.height - 118 - lift, x + 10,
+                       self.height - 142 - lift, fill="#f8fafc", width=4)
+        elif event.kind == "vodka_round":
+            positions = [role_positions.get(role) for role in event.roles]
+            positions = [value for value in positions if value is not None]
+            if positions:
+                x = positions[int(elapsed * 2.2) % len(positions)]
+                self._rectangle(x - 5, 45, x + 5, 68,
+                                fill="#dbeafe", outline="#f8fafc", width=2)
         self._text(
             self.width / 2, 39, event.text, anchor="n",
             fill="#f8fafc", font=("Segoe UI", 10, "bold"),
@@ -696,7 +753,13 @@ class BandRenderer:
         if solo:
             ground += 4
 
-        role_frames = self._sprite_frames[musician.role]
+        requested_scale = float(
+            self._stage_layout.get(musician.role, {}).get("scale", 1.0)
+        )
+        scale_key = min((0.8, 1.0, 1.2), key=lambda value: abs(value - requested_scale))
+        role_frames = self._scaled_sprite_frames.get(
+            (musician.role, scale_key), self._sprite_frames[musician.role]
+        )
         if state != "playing" and not drop_active:
             frame_index = 0
         elif musician.role == "singer" and len(role_frames) >= 8:
